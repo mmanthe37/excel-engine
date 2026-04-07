@@ -1,0 +1,158 @@
+"""
+Configuration, constants, and enums for the Excel Engine.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from enum import Enum, IntEnum
+from pathlib import Path
+from typing import Optional
+
+
+class Layer(IntEnum):
+    """Execution layers in priority order."""
+    OPENPYXL = 1
+    XLWINGS = 2
+    APPLESCRIPT = 3
+    SYSTEM_EVENTS = 4
+    VBA = 5
+    PYAUTOGUI = 6
+
+
+class TaskType(Enum):
+    """Recognized task types that the engine can execute."""
+    FORMULA = "formula"
+    TABLE_CREATE = "table_create"
+    TABLE_STYLE = "table_style"
+    TABLE_TOTAL_ROW = "table_total_row"
+    CALCULATED_COLUMN = "calculated_column"
+    FORMATTING = "formatting"
+    CONDITIONAL_FORMAT = "conditional_format"
+    NUMBER_FORMAT = "number_format"
+    ALIGNMENT = "alignment"
+    COLUMN_WIDTH = "column_width"
+    ROW_HEIGHT = "row_height"
+    FREEZE_PANES = "freeze_panes"
+    SPLIT_PANES = "split_panes"
+    AUTOFILTER = "autofilter"
+    ADVANCED_FILTER = "advanced_filter"
+    SORT = "sort"
+    SUBTOTAL = "subtotal"
+    CHART_BAR = "chart_bar"
+    CHART_LINE = "chart_line"
+    CHART_PIE = "chart_pie"
+    CHART_HISTOGRAM = "chart_histogram"
+    NAMED_RANGE = "named_range"
+    DATA_VALIDATION = "data_validation"
+    SLICER = "slicer"
+    PIVOT_TABLE = "pivot_table"
+    PIVOT_CHART = "pivot_chart"
+    SHEET_CREATE = "sheet_create"
+    SHEET_RENAME = "sheet_rename"
+    SHEET_MOVE = "sheet_move"
+    CELL_VALUE = "cell_value"
+    MERGE_CELLS = "merge_cells"
+    BORDER = "border"
+    FILL = "fill"
+    FONT = "font"
+    SAVE = "save"
+    SAVE_AS = "save_as"
+    PRINT_SETTINGS = "print_settings"
+
+
+# Maps each TaskType to the preferred layer(s) that can handle it,
+# with fallback order.
+TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
+    TaskType.FORMULA:             [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.TABLE_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.TABLE_STYLE:         [Layer.OPENPYXL, Layer.SYSTEM_EVENTS],
+    TaskType.TABLE_TOTAL_ROW:     [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.CALCULATED_COLUMN:   [Layer.XLWINGS, Layer.APPLESCRIPT],  # structural refs need LIVE
+    TaskType.FORMATTING:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.CONDITIONAL_FORMAT:  [Layer.OPENPYXL],
+    TaskType.NUMBER_FORMAT:       [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.ALIGNMENT:           [Layer.OPENPYXL],
+    TaskType.COLUMN_WIDTH:        [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.ROW_HEIGHT:          [Layer.OPENPYXL],
+    TaskType.FREEZE_PANES:        [Layer.OPENPYXL, Layer.APPLESCRIPT],
+    TaskType.SPLIT_PANES:         [Layer.XLWINGS],
+    TaskType.AUTOFILTER:          [Layer.OPENPYXL, Layer.APPLESCRIPT],
+    TaskType.ADVANCED_FILTER:     [Layer.XLWINGS],
+    TaskType.SORT:                [Layer.APPLESCRIPT, Layer.XLWINGS],
+    TaskType.SUBTOTAL:            [Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.CHART_BAR:           [Layer.OPENPYXL],
+    TaskType.CHART_LINE:          [Layer.OPENPYXL],
+    TaskType.CHART_PIE:           [Layer.OPENPYXL],
+    TaskType.CHART_HISTOGRAM:     [Layer.SYSTEM_EVENTS],  # cx:chart — must use UI
+    TaskType.NAMED_RANGE:         [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.DATA_VALIDATION:     [Layer.OPENPYXL],
+    TaskType.SLICER:              [Layer.SYSTEM_EVENTS],  # must use ribbon UI
+    TaskType.PIVOT_TABLE:         [Layer.VBA],
+    TaskType.PIVOT_CHART:         [Layer.VBA],
+    TaskType.SHEET_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.SHEET_RENAME:        [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.SHEET_MOVE:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.CELL_VALUE:          [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.MERGE_CELLS:         [Layer.OPENPYXL],
+    TaskType.BORDER:              [Layer.OPENPYXL],
+    TaskType.FILL:                [Layer.OPENPYXL],
+    TaskType.FONT:                [Layer.OPENPYXL],
+    TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],
+    TaskType.SAVE_AS:             [Layer.APPLESCRIPT],
+    TaskType.PRINT_SETTINGS:      [Layer.OPENPYXL],
+}
+
+
+@dataclass
+class EngineConfig:
+    """Runtime configuration for the Excel Engine."""
+
+    # Timeouts (seconds)
+    scan_timeout: float = 120.0
+    section_timeout: float = 300.0
+    applescript_timeout: float = 30.0
+    ui_automation_timeout: float = 60.0
+    vba_execution_timeout: float = 45.0
+
+    # Retries
+    max_retries: int = 3
+    retry_delay: float = 2.0
+
+    # Layer preferences — lower index = higher priority
+    layer_order: list[Layer] = field(
+        default_factory=lambda: [
+            Layer.OPENPYXL,
+            Layer.XLWINGS,
+            Layer.APPLESCRIPT,
+            Layer.SYSTEM_EVENTS,
+            Layer.VBA,
+            Layer.PYAUTOGUI,
+        ]
+    )
+
+    # Paths
+    desktop_path: Path = field(
+        default_factory=lambda: Path.home() / "Desktop"
+    )
+    working_dir: Optional[Path] = None
+
+    # SAM-specific
+    sam_fingerprint_protected: bool = True  # never rename/move/save-as SAM files
+    copy_to_desktop_for_xlwings: bool = True  # avoid colon-in-path bug
+
+    # UI automation
+    retina_display: bool = True  # divide physical coords by 2 for PyAutoGUI
+    ui_delay_between_actions: float = 0.5
+
+    # VBA
+    vba_split_threshold: int = 50  # lines per sub to avoid OOM Error 7
+
+    # Verification
+    verify_after_each_section: bool = True
+
+    def get_layers_for_task(self, task_type: TaskType) -> list[Layer]:
+        """Return the ordered list of layers that can handle a given task type."""
+        candidates = TASK_LAYER_MAP.get(task_type, [])
+        return sorted(candidates, key=lambda l: self.layer_order.index(l))

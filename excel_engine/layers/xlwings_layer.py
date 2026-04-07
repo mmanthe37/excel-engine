@@ -262,6 +262,116 @@ class XlwingsLayer:
         self._wb.sheets[sheet_name].activate()
         time.sleep(0.3)
 
+    # ── Charts ──
+
+    def add_chart(
+        self,
+        chart_type: str,
+        data_range: str,
+        sheet: Optional[str] = None,
+        title: str = "",
+        anchor: str = "E2",
+        width: float = 450,
+        height: float = 300,
+        secondary_axis_series: Optional[list[int]] = None,
+    ) -> None:
+        """
+        Add a chart using xlwings live API.
+
+        chart_type: xlwings constant name — 'scatter', 'area', 'line',
+                    'bar_clustered', 'column_clustered', etc.
+        secondary_axis_series: list of 0-based series indices to put on secondary axis.
+        """
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+
+        ws = self._ws(sheet)
+
+        # Map friendly names to xlwings chart type strings
+        _CHART_MAP = {
+            "scatter": "xy_scatter",
+            "scatter_lines": "xy_scatter_lines",
+            "scatter_smooth": "xy_scatter_smooth",
+            "area": "area",
+            "area_stacked": "area_stacked",
+            "line": "line",
+            "line_markers": "line_markers",
+            "bar": "bar_clustered",
+            "column": "column_clustered",
+            "pie": "pie",
+            "combo": "column_clustered",  # combo starts as column, add line series on secondary
+        }
+
+        xl_type = _CHART_MAP.get(chart_type, chart_type)
+
+        chart = ws.charts.add(
+            left=ws.range(anchor).left,
+            top=ws.range(anchor).top,
+            width=width,
+            height=height,
+        )
+        chart.set_source_data(ws.range(data_range))
+        chart.chart_type = xl_type
+
+        if title:
+            chart.api.has_title = True
+            chart.api.chart_title.text = title
+
+        # Move specified series to secondary axis
+        if secondary_axis_series:
+            for idx in secondary_axis_series:
+                try:
+                    series = chart.api.series_collection(idx + 1)  # 1-based
+                    series.axis_group = 2  # xlSecondary
+                except Exception:
+                    logger.warning("Could not set series %d to secondary axis", idx)
+
+        logger.info(
+            "Added %s chart '%s' at %s via xlwings",
+            chart_type, title, anchor,
+        )
+
+    def add_sparkline(
+        self,
+        data_range: str,
+        location_range: str,
+        sparkline_type: str = "line",
+        sheet: Optional[str] = None,
+    ) -> None:
+        """
+        Add sparklines using xlwings API.
+
+        sparkline_type: 'line' (6), 'column' (7), 'win_loss' (8)
+        Uses SparklineGroups.Add via the COM/Apple Events API.
+        """
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+
+        ws = self._ws(sheet)
+
+        _SPARK_TYPE = {
+            "line": 6,       # xlSparkLine
+            "column": 7,     # xlSparkColumn
+            "win_loss": 8,   # xlSparkColumnStacked100
+        }
+        spark_type_id = _SPARK_TYPE.get(sparkline_type, 6)
+
+        try:
+            loc = ws.range(location_range)
+            loc.api.sparkline_groups.add(
+                spark_type_id,
+                ws.range(data_range).api,
+            )
+            logger.info(
+                "Added %s sparkline: data=%s, location=%s via xlwings",
+                sparkline_type, data_range, location_range,
+            )
+        except Exception as e:
+            logger.warning("xlwings sparkline failed (%s) — fallback to System Events", e)
+            raise
+
     # ── Save ──
 
     def save(self) -> None:

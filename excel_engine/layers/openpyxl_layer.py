@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+from openpyxl.chart import (
+    AreaChart,
+    BarChart,
+    LineChart,
+    PieChart,
+    Reference,
+    ScatterChart,
+    Series,
+)
 from openpyxl.formatting.rule import CellIsRule, FormulaRule, ColorScaleRule
 from openpyxl.styles import (
     Alignment,
@@ -82,6 +90,16 @@ class OpenpyxlLayer:
         if sheet_name:
             return self.wb[sheet_name]
         return self.wb.active
+
+    @staticmethod
+    def _qualify_range(ws, rng: str) -> str:
+        """Ensure a range string has a sheet qualifier (e.g. 'Sheet!A1:B10')."""
+        if "!" not in rng:
+            title = ws.title
+            if " " in title:
+                title = f"'{title}'"
+            return f"{title}!{rng}"
+        return rng
 
     # ── Sheet Management ──
 
@@ -363,11 +381,11 @@ class OpenpyxlLayer:
         chart.width = width
         chart.height = height
 
-        data_ref = Reference(ws, range_string=data_range)
+        data_ref = Reference(ws, range_string=self._qualify_range(ws, data_range))
         chart.add_data(data_ref, titles_from_data=True)
 
         if cats_range:
-            cats_ref = Reference(ws, range_string=cats_range)
+            cats_ref = Reference(ws, range_string=self._qualify_range(ws, cats_range))
             chart.set_categories(cats_ref)
 
         ws.add_chart(chart, anchor)
@@ -392,11 +410,11 @@ class OpenpyxlLayer:
         chart.width = width
         chart.height = height
 
-        data_ref = Reference(ws, range_string=data_range)
+        data_ref = Reference(ws, range_string=self._qualify_range(ws, data_range))
         chart.add_data(data_ref, titles_from_data=True)
 
         if cats_range:
-            cats_ref = Reference(ws, range_string=cats_range)
+            cats_ref = Reference(ws, range_string=self._qualify_range(ws, cats_range))
             chart.set_categories(cats_ref)
 
         ws.add_chart(chart, anchor)
@@ -419,15 +437,137 @@ class OpenpyxlLayer:
         chart.width = width
         chart.height = height
 
-        data_ref = Reference(ws, range_string=data_range)
+        data_ref = Reference(ws, range_string=self._qualify_range(ws, data_range))
         chart.add_data(data_ref, titles_from_data=True)
 
         if cats_range:
-            cats_ref = Reference(ws, range_string=cats_range)
+            cats_ref = Reference(ws, range_string=self._qualify_range(ws, cats_range))
             chart.set_categories(cats_ref)
 
         ws.add_chart(chart, anchor)
         logger.info("Added pie chart '%s' at %s", title, anchor)
+
+    def add_scatter_chart(
+        self,
+        sheet: Optional[str] = None,
+        title: str = "",
+        x_range: str = "A1:A10",
+        y_range: str = "B1:B10",
+        anchor: str = "E2",
+        width: float = 15,
+        height: float = 10,
+        style: int = 13,
+        scatter_style: str = "line",
+    ) -> None:
+        """
+        Add a scatter (XY) chart.
+
+        scatter_style: 'line', 'lineMarker', 'marker', 'smooth', 'smoothMarker'
+        """
+        ws = self._ws(sheet)
+        chart = ScatterChart()
+        chart.title = title
+        chart.style = style
+        chart.width = width
+        chart.height = height
+        chart.x_axis.title = ""
+        chart.y_axis.title = ""
+
+        x_ref = Reference(ws, range_string=self._qualify_range(ws, x_range))
+        y_ref = Reference(ws, range_string=self._qualify_range(ws, y_range))
+        series = Series(y_ref, x_ref, title_from_data=True)
+        series.graphicalProperties.line.noFill = scatter_style == "marker"
+        chart.series.append(series)
+
+        ws.add_chart(chart, anchor)
+        logger.info("Added scatter chart '%s' (style=%s) at %s", title, scatter_style, anchor)
+
+    def add_area_chart(
+        self,
+        sheet: Optional[str] = None,
+        title: str = "",
+        data_range: str = "B1:B10",
+        cats_range: Optional[str] = None,
+        anchor: str = "E2",
+        width: float = 15,
+        height: float = 10,
+        style: int = 10,
+        grouping: str = "standard",
+    ) -> None:
+        """
+        Add an area chart.
+
+        grouping: 'standard', 'stacked', 'percentStacked'
+        """
+        ws = self._ws(sheet)
+        chart = AreaChart()
+        chart.title = title
+        chart.style = style
+        chart.width = width
+        chart.height = height
+        chart.grouping = grouping
+
+        data_ref = Reference(ws, range_string=self._qualify_range(ws, data_range))
+        chart.add_data(data_ref, titles_from_data=True)
+
+        if cats_range:
+            cats_ref = Reference(ws, range_string=self._qualify_range(ws, cats_range))
+            chart.set_categories(cats_ref)
+
+        ws.add_chart(chart, anchor)
+        logger.info("Added area chart '%s' (grouping=%s) at %s", title, grouping, anchor)
+
+    def add_combo_chart(
+        self,
+        sheet: Optional[str] = None,
+        title: str = "",
+        bar_data_range: str = "B1:B10",
+        line_data_range: str = "C1:C10",
+        cats_range: Optional[str] = None,
+        anchor: str = "E2",
+        width: float = 15,
+        height: float = 10,
+        secondary_axis: bool = True,
+    ) -> None:
+        """
+        Add a combo chart (bar + line, optionally with secondary axis).
+
+        openpyxl supports this by appending a LineChart onto a BarChart.
+        """
+        ws = self._ws(sheet)
+
+        bar_chart = BarChart()
+        bar_chart.type = "col"
+        bar_chart.title = title
+        bar_chart.style = 10
+        bar_chart.width = width
+        bar_chart.height = height
+
+        bar_ref = Reference(ws, range_string=self._qualify_range(ws, bar_data_range))
+        bar_chart.add_data(bar_ref, titles_from_data=True)
+
+        if cats_range:
+            cats_ref = Reference(ws, range_string=self._qualify_range(ws, cats_range))
+            bar_chart.set_categories(cats_ref)
+
+        # Create the line series on secondary axis
+        line_chart = LineChart()
+        line_ref = Reference(ws, range_string=self._qualify_range(ws, line_data_range))
+        line_chart.add_data(line_ref, titles_from_data=True)
+
+        if secondary_axis:
+            line_chart.y_axis.axId = 200
+            line_chart.y_axis.crosses = "max"
+            bar_chart.y_axis.crosses = "min"
+
+        # Merge line chart into bar chart
+        bar_chart += line_chart
+
+        ws.add_chart(bar_chart, anchor)
+        logger.info(
+            "Added combo chart '%s' (secondary_axis=%s) at %s",
+            title, secondary_axis, anchor,
+        )
 
     # ── Named Ranges ──
 

@@ -247,6 +247,172 @@ class SystemEventsLayer:
                 bin_width, overflow, underflow,
             )
 
+    # ── Scatter Chart ──
+
+    def insert_scatter_chart(self, data_range: Optional[str] = None) -> None:
+        """
+        Insert a scatter (XY) chart via the ribbon UI.
+        Path: Insert tab → Charts group → Insert Scatter (X, Y) → Scatter
+        """
+        self._activate_excel()
+
+        if data_range:
+            MacUtils.run_applescript(
+                f'tell application "Microsoft Excel"\n'
+                f'    select range "{data_range}" of active sheet\n'
+                f'end tell'
+            )
+            time.sleep(self.delay)
+
+        script = (
+            f'tell application "System Events"\n'
+            f'    tell process "Microsoft Excel"\n'
+            f'        set frontmost to true\n'
+            f'        delay {self.delay}\n'
+            f'        -- Click Insert tab\n'
+            f'        tell tab group 1 of group 1 of tool bar 1 of window 1\n'
+            f'            click radio button "Insert"\n'
+            f'        end tell\n'
+            f'        delay {self.delay * 2}\n'
+            f'        -- Click the scatter chart menu button\n'
+            f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
+            f'            tell group "Charts"\n'
+            f'                click menu button "Insert Scatter (X, Y) or Bubble Chart"\n'
+            f'            end tell\n'
+            f'        end tell\n'
+            f'        delay {self.delay}\n'
+            f'        -- Click Scatter in the dropdown\n'
+            f'        click menu item "Scatter" of menu 1 of menu button '
+            f'"Insert Scatter (X, Y) or Bubble Chart" of group "Charts" '
+            f'of scroll area 1 of group 1 of tool bar 1 of window 1\n'
+            f'    end tell\n'
+            f'end tell'
+        )
+        self._run(script)
+        time.sleep(2)
+        logger.info("Inserted scatter chart via ribbon")
+
+    # ── Combo Chart ──
+
+    def insert_combo_chart(
+        self,
+        data_range: Optional[str] = None,
+        secondary_axis: bool = True,
+    ) -> None:
+        """
+        Insert a combo chart via the ribbon UI.
+        Path: Insert tab → Charts group → Insert Combo Chart → Clustered Column – Line on Secondary Axis
+        """
+        self._activate_excel()
+
+        if data_range:
+            MacUtils.run_applescript(
+                f'tell application "Microsoft Excel"\n'
+                f'    select range "{data_range}" of active sheet\n'
+                f'end tell'
+            )
+            time.sleep(self.delay)
+
+        chart_item = (
+            "Clustered Column - Line on Secondary Axis"
+            if secondary_axis
+            else "Clustered Column - Line"
+        )
+
+        script = (
+            f'tell application "System Events"\n'
+            f'    tell process "Microsoft Excel"\n'
+            f'        set frontmost to true\n'
+            f'        delay {self.delay}\n'
+            f'        -- Click Insert tab\n'
+            f'        tell tab group 1 of group 1 of tool bar 1 of window 1\n'
+            f'            click radio button "Insert"\n'
+            f'        end tell\n'
+            f'        delay {self.delay * 2}\n'
+            f'        -- Click the combo chart menu button\n'
+            f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
+            f'            tell group "Charts"\n'
+            f'                click menu button "Insert Combo Chart"\n'
+            f'            end tell\n'
+            f'        end tell\n'
+            f'        delay {self.delay}\n'
+            f'        -- Click the desired combo type\n'
+            f'        click menu item "{chart_item}" of menu 1 of menu button '
+            f'"Insert Combo Chart" of group "Charts" '
+            f'of scroll area 1 of group 1 of tool bar 1 of window 1\n'
+            f'    end tell\n'
+            f'end tell'
+        )
+        self._run(script)
+        time.sleep(2)
+        logger.info("Inserted combo chart (secondary_axis=%s) via ribbon", secondary_axis)
+
+    # ── Sparklines ──
+
+    def insert_sparkline(
+        self,
+        data_range: str,
+        location_range: str,
+        sparkline_type: str = "Line",
+    ) -> None:
+        """
+        Insert sparklines via the ribbon UI.
+        Path: Insert tab → Sparklines group → Line/Column/Win-Loss button
+
+        data_range:     Source data range (e.g., "B2:M2")
+        location_range: Where to place the sparkline (e.g., "N2")
+        sparkline_type: "Line", "Column", or "Win/Loss"
+        """
+        self._activate_excel()
+
+        # First select the location cell(s)
+        MacUtils.run_applescript(
+            f'tell application "Microsoft Excel"\n'
+            f'    select range "{location_range}" of active sheet\n'
+            f'end tell'
+        )
+        time.sleep(self.delay)
+
+        # Map type to ribbon button name
+        button_name = {
+            "Line": "Line",
+            "Column": "Column",
+            "Win/Loss": "Win/Loss",
+        }.get(sparkline_type, "Line")
+
+        script = (
+            f'tell application "System Events"\n'
+            f'    tell process "Microsoft Excel"\n'
+            f'        set frontmost to true\n'
+            f'        delay {self.delay}\n'
+            f'        -- Click Insert tab\n'
+            f'        tell tab group 1 of group 1 of tool bar 1 of window 1\n'
+            f'            click radio button "Insert"\n'
+            f'        end tell\n'
+            f'        delay {self.delay * 2}\n'
+            f'        -- Click sparkline type button in Sparklines group\n'
+            f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
+            f'            tell group "Sparklines"\n'
+            f'                click button "{button_name}"\n'
+            f'            end tell\n'
+            f'        end tell\n'
+            f'        delay 1.5\n'
+            f'        -- The Create Sparklines dialog opens; set data range\n'
+            f'        tell window 1\n'
+            f'            set value of text field 1 to "{data_range}"\n'
+            f'            delay {self.delay}\n'
+            f'            click button "OK"\n'
+            f'        end tell\n'
+            f'    end tell\n'
+            f'end tell'
+        )
+        self._run(script)
+        time.sleep(1.5)
+        logger.info(
+            "Inserted %s sparkline: data=%s, location=%s",
+            sparkline_type, data_range, location_range,
+        )
+
     # ── Table Style Gallery ──
 
     def apply_table_style_via_ribbon(self, style_name: str) -> None:

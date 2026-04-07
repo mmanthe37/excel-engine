@@ -148,9 +148,9 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.CHART_BAR:           [Layer.OPENPYXL],
     TaskType.CHART_LINE:          [Layer.OPENPYXL],
     TaskType.CHART_PIE:           [Layer.OPENPYXL],
-    TaskType.CHART_SCATTER:       [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.CHART_AREA:          [Layer.OPENPYXL],
-    TaskType.CHART_COMBO:         [Layer.XLWINGS, Layer.SYSTEM_EVENTS],  # combo charts need live API
+    TaskType.CHART_SCATTER:       [Layer.OPENPYXL, Layer.XLWINGS, Layer.SYSTEM_EVENTS],
+    TaskType.CHART_AREA:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.CHART_COMBO:         [Layer.OPENPYXL, Layer.XLWINGS, Layer.SYSTEM_EVENTS],  # openpyxl merges bar+line
     TaskType.CHART_HISTOGRAM:     [Layer.SYSTEM_EVENTS],                 # cx:chart — must use UI
     TaskType.SPARKLINE:           [Layer.XLWINGS, Layer.SYSTEM_EVENTS],  # sparklines need live API
 

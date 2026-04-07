@@ -390,6 +390,37 @@ class ExcelEngine:
                 anchor=task.params.get("anchor", "E2"),
             )
 
+        elif tt == TaskType.CHART_SCATTER:
+            self.openpyxl.add_scatter_chart(
+                sheet=task.sheet,
+                title=task.params.get("title", ""),
+                x_range=task.params.get("x_range", task.range or "A1:A10"),
+                y_range=task.params.get("y_range", "B1:B10"),
+                anchor=task.params.get("anchor", "E2"),
+                scatter_style=task.params.get("scatter_style", "line"),
+            )
+
+        elif tt == TaskType.CHART_AREA:
+            self.openpyxl.add_area_chart(
+                sheet=task.sheet,
+                title=task.params.get("title", ""),
+                data_range=task.params.get("data_range", task.range or "B1:B10"),
+                cats_range=task.params.get("cats_range"),
+                anchor=task.params.get("anchor", "E2"),
+                grouping=task.params.get("grouping", "standard"),
+            )
+
+        elif tt == TaskType.CHART_COMBO:
+            self.openpyxl.add_combo_chart(
+                sheet=task.sheet,
+                title=task.params.get("title", ""),
+                bar_data_range=task.params.get("bar_data_range", task.range or "B1:B10"),
+                line_data_range=task.params.get("line_data_range", "C1:C10"),
+                cats_range=task.params.get("cats_range"),
+                anchor=task.params.get("anchor", "E2"),
+                secondary_axis=task.params.get("secondary_axis", True),
+            )
+
         elif tt == TaskType.NAMED_RANGE:
             name = task.params.get("name", "NamedRange1")
             sheet = task.sheet or self.openpyxl.wb.active.title
@@ -502,6 +533,38 @@ class ExcelEngine:
         elif tt == TaskType.SAVE:
             self.xlwings.save()
 
+        elif tt in (
+            TaskType.CHART_SCATTER, TaskType.CHART_AREA,
+            TaskType.CHART_COMBO, TaskType.CHART_BAR,
+            TaskType.CHART_LINE,
+        ):
+            _TYPE_MAP = {
+                TaskType.CHART_SCATTER: "scatter",
+                TaskType.CHART_AREA: "area",
+                TaskType.CHART_COMBO: "combo",
+                TaskType.CHART_BAR: "column",
+                TaskType.CHART_LINE: "line",
+            }
+            secondary = None
+            if tt == TaskType.CHART_COMBO:
+                secondary = task.params.get("secondary_axis_series", [1])
+            self.xlwings.add_chart(
+                chart_type=_TYPE_MAP[tt],
+                data_range=task.params.get("data_range", task.range or "A1:B10"),
+                sheet=task.sheet,
+                title=task.params.get("title", ""),
+                anchor=task.params.get("anchor", "E2"),
+                secondary_axis_series=secondary,
+            )
+
+        elif tt == TaskType.SPARKLINE:
+            self.xlwings.add_sparkline(
+                data_range=task.params.get("data_range", task.range or "B2:M2"),
+                location_range=task.params.get("location_range", task.cell or "N2"),
+                sparkline_type=task.params.get("sparkline_type", "line"),
+                sheet=task.sheet,
+            )
+
         else:
             raise NotImplementedError(
                 f"xlwings handler not implemented for {tt.value}"
@@ -586,6 +649,24 @@ class ExcelEngine:
         elif tt == TaskType.TABLE_STYLE:
             style = task.style or task.params.get("style", "TableStyleMedium5")
             self.system_events.apply_table_style_via_ribbon(style)
+
+        elif tt == TaskType.CHART_SCATTER:
+            self.system_events.insert_scatter_chart(
+                data_range=task.range or task.params.get("data_range"),
+            )
+
+        elif tt == TaskType.CHART_COMBO:
+            self.system_events.insert_combo_chart(
+                data_range=task.range or task.params.get("data_range"),
+                secondary_axis=task.params.get("secondary_axis", True),
+            )
+
+        elif tt == TaskType.SPARKLINE:
+            self.system_events.insert_sparkline(
+                data_range=task.params.get("data_range", task.range or "B2:M2"),
+                location_range=task.params.get("location_range", task.cell or "N2"),
+                sparkline_type=task.params.get("sparkline_type", "Line"),
+            )
 
         else:
             raise NotImplementedError(

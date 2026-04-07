@@ -187,3 +187,103 @@ class TestMacUtils:
         x, y = MacUtils.logical_to_retina(1440, 900)
         assert x == 2880
         assert y == 1800
+
+
+class TestOpenpyxlCharts:
+    """Test openpyxl chart creation methods."""
+
+    def setup_method(self):
+        from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
+        self.layer = OpenpyxlLayer()
+        self.layer.wb = __import__("openpyxl").Workbook()
+        ws = self.layer.wb.active
+        # Populate sample data for charts
+        ws["A1"] = "Category"
+        ws["B1"] = "Values"
+        ws["C1"] = "Values2"
+        for i in range(2, 12):
+            ws[f"A{i}"] = f"Item {i-1}"
+            ws[f"B{i}"] = i * 10
+            ws[f"C{i}"] = i * 5
+
+    def test_add_scatter_chart(self):
+        self.layer.add_scatter_chart(
+            title="Test Scatter",
+            x_range="A2:A11",
+            y_range="B2:B11",
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_add_area_chart(self):
+        self.layer.add_area_chart(
+            title="Test Area",
+            data_range="B1:B11",
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_add_area_chart_stacked(self):
+        self.layer.add_area_chart(
+            title="Stacked Area",
+            data_range="B1:C11",
+            grouping="stacked",
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_add_combo_chart(self):
+        self.layer.add_combo_chart(
+            title="Test Combo",
+            bar_data_range="B1:B11",
+            line_data_range="C1:C11",
+            secondary_axis=True,
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_add_combo_chart_no_secondary(self):
+        self.layer.add_combo_chart(
+            title="Combo No Secondary",
+            bar_data_range="B1:B11",
+            line_data_range="C1:C11",
+            secondary_axis=False,
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_scatter_with_style(self):
+        self.layer.add_scatter_chart(
+            title="Markers Only",
+            x_range="A2:A11",
+            y_range="B2:B11",
+            scatter_style="marker",
+        )
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 1
+
+    def test_multiple_charts_on_sheet(self):
+        self.layer.add_bar_chart(title="Bar", data_range="B1:B11")
+        self.layer.add_scatter_chart(title="Scatter", x_range="A2:A11", y_range="B2:B11")
+        self.layer.add_area_chart(title="Area", data_range="B1:B11")
+        ws = self.layer.wb.active
+        assert len(ws._charts) == 3
+
+
+class TestSystemEventsCharts:
+    """Test SystemEventsLayer chart method signatures exist."""
+
+    def test_has_scatter_method(self):
+        layer = SystemEventsLayer()
+        assert hasattr(layer, "insert_scatter_chart")
+        assert callable(layer.insert_scatter_chart)
+
+    def test_has_combo_method(self):
+        layer = SystemEventsLayer()
+        assert hasattr(layer, "insert_combo_chart")
+        assert callable(layer.insert_combo_chart)
+
+    def test_has_sparkline_method(self):
+        layer = SystemEventsLayer()
+        assert hasattr(layer, "insert_sparkline")
+        assert callable(layer.insert_sparkline)

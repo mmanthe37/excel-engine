@@ -46,6 +46,27 @@ class TestEngineConfig:
         layers = config.get_layers_for_task(TaskType.CHART_HISTOGRAM)
         assert layers == [Layer.SYSTEM_EVENTS]
 
+    def test_scatter_starts_with_openpyxl(self):
+        config = EngineConfig()
+        layers = config.get_layers_for_task(TaskType.CHART_SCATTER)
+        assert layers[0] == Layer.OPENPYXL
+
+    def test_area_starts_with_openpyxl(self):
+        config = EngineConfig()
+        layers = config.get_layers_for_task(TaskType.CHART_AREA)
+        assert layers[0] == Layer.OPENPYXL
+
+    def test_combo_has_openpyxl_fallback(self):
+        config = EngineConfig()
+        layers = config.get_layers_for_task(TaskType.CHART_COMBO)
+        assert Layer.OPENPYXL in layers
+
+    def test_sparkline_needs_live(self):
+        config = EngineConfig()
+        layers = config.get_layers_for_task(TaskType.SPARKLINE)
+        assert Layer.XLWINGS in layers
+        assert Layer.OPENPYXL not in layers
+
     def test_pivot_requires_vba(self):
         config = EngineConfig()
         layers = config.get_layers_for_task(TaskType.PIVOT_TABLE)

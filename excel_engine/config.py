@@ -23,85 +23,155 @@ class Layer(IntEnum):
 
 class TaskType(Enum):
     """Recognized task types that the engine can execute."""
+    # ── Data Entry & Formulas ──
     FORMULA = "formula"
+    CELL_VALUE = "cell_value"
+    TEXT_FUNCTION = "text_function"          # CONCAT, LEFT, MID, RIGHT, UPPER, etc.
+    LOOKUP_FUNCTION = "lookup_function"      # XLOOKUP, VLOOKUP, HLOOKUP, INDEX/MATCH
+    FILTER_FUNCTION = "filter_function"      # FILTER dynamic array function
+    SORT_FUNCTION = "sort_function"          # SORT dynamic array function
+    UNIQUE_FUNCTION = "unique_function"      # UNIQUE dynamic array function
+    THREE_D_REFERENCE = "three_d_reference"  # cross-sheet formulas like =SUM(Sheet1:Sheet3!A1)
+    EXTERNAL_REFERENCE = "external_reference"  # links to other workbooks
+
+    # ── Tables ──
     TABLE_CREATE = "table_create"
     TABLE_STYLE = "table_style"
     TABLE_TOTAL_ROW = "table_total_row"
     CALCULATED_COLUMN = "calculated_column"
+
+    # ── Formatting ──
     FORMATTING = "formatting"
     CONDITIONAL_FORMAT = "conditional_format"
     NUMBER_FORMAT = "number_format"
     ALIGNMENT = "alignment"
     COLUMN_WIDTH = "column_width"
     ROW_HEIGHT = "row_height"
+    FONT = "font"
+    FILL = "fill"
+    BORDER = "border"
+    MERGE_CELLS = "merge_cells"
+    TAB_COLOR = "tab_color"
+
+    # ── View & Layout ──
     FREEZE_PANES = "freeze_panes"
     SPLIT_PANES = "split_panes"
+    PAGE_BREAK = "page_break"
+    PRINT_SETTINGS = "print_settings"
+
+    # ── Data Tools ──
     AUTOFILTER = "autofilter"
     ADVANCED_FILTER = "advanced_filter"
     SORT = "sort"
     SUBTOTAL = "subtotal"
+    DATA_VALIDATION = "data_validation"
+    GOAL_SEEK = "goal_seek"
+
+    # ── Charts ──
     CHART_BAR = "chart_bar"
     CHART_LINE = "chart_line"
     CHART_PIE = "chart_pie"
+    CHART_SCATTER = "chart_scatter"
+    CHART_AREA = "chart_area"
+    CHART_COMBO = "chart_combo"
     CHART_HISTOGRAM = "chart_histogram"
+    SPARKLINE = "sparkline"
+
+    # ── Ranges & References ──
     NAMED_RANGE = "named_range"
-    DATA_VALIDATION = "data_validation"
+    HYPERLINK = "hyperlink"
+
+    # ── Advanced Features ──
     SLICER = "slicer"
     PIVOT_TABLE = "pivot_table"
     PIVOT_CHART = "pivot_chart"
+
+    # ── Sheet Operations ──
     SHEET_CREATE = "sheet_create"
     SHEET_RENAME = "sheet_rename"
     SHEET_MOVE = "sheet_move"
-    CELL_VALUE = "cell_value"
-    MERGE_CELLS = "merge_cells"
-    BORDER = "border"
-    FILL = "fill"
-    FONT = "font"
+    SHEET_COPY = "sheet_copy"
+
+    # ── File Operations ──
     SAVE = "save"
     SAVE_AS = "save_as"
-    PRINT_SETTINGS = "print_settings"
 
 
 # Maps each TaskType to the preferred layer(s) that can handle it,
 # with fallback order.
 TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
+    # ── Data Entry & Formulas ──
     TaskType.FORMULA:             [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.CELL_VALUE:          [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.TEXT_FUNCTION:       [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.LOOKUP_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # XLOOKUP needs live eval
+    TaskType.FILTER_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
+    TaskType.SORT_FUNCTION:       [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
+    TaskType.UNIQUE_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
+    TaskType.THREE_D_REFERENCE:   [Layer.XLWINGS, Layer.APPLESCRIPT],    # cross-sheet — live preferred
+    TaskType.EXTERNAL_REFERENCE:  [Layer.XLWINGS, Layer.APPLESCRIPT],    # external links — live only
+
+    # ── Tables ──
     TaskType.TABLE_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.TABLE_STYLE:         [Layer.OPENPYXL, Layer.SYSTEM_EVENTS],
     TaskType.TABLE_TOTAL_ROW:     [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.CALCULATED_COLUMN:   [Layer.XLWINGS, Layer.APPLESCRIPT],  # structural refs need LIVE
+    TaskType.CALCULATED_COLUMN:   [Layer.XLWINGS, Layer.APPLESCRIPT],    # structural refs need LIVE
+
+    # ── Formatting ──
     TaskType.FORMATTING:          [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.CONDITIONAL_FORMAT:  [Layer.OPENPYXL],
     TaskType.NUMBER_FORMAT:       [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.ALIGNMENT:           [Layer.OPENPYXL],
     TaskType.COLUMN_WIDTH:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.ROW_HEIGHT:          [Layer.OPENPYXL],
+    TaskType.FONT:                [Layer.OPENPYXL],
+    TaskType.FILL:                [Layer.OPENPYXL],
+    TaskType.BORDER:              [Layer.OPENPYXL],
+    TaskType.MERGE_CELLS:         [Layer.OPENPYXL],
+    TaskType.TAB_COLOR:           [Layer.OPENPYXL, Layer.XLWINGS],
+
+    # ── View & Layout ──
     TaskType.FREEZE_PANES:        [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.SPLIT_PANES:         [Layer.XLWINGS],
+    TaskType.PAGE_BREAK:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.PRINT_SETTINGS:      [Layer.OPENPYXL],
+
+    # ── Data Tools ──
     TaskType.AUTOFILTER:          [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.ADVANCED_FILTER:     [Layer.XLWINGS],
     TaskType.SORT:                [Layer.APPLESCRIPT, Layer.XLWINGS],
     TaskType.SUBTOTAL:            [Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.DATA_VALIDATION:     [Layer.OPENPYXL],
+    TaskType.GOAL_SEEK:           [Layer.XLWINGS, Layer.APPLESCRIPT],    # live Excel required
+
+    # ── Charts ──
     TaskType.CHART_BAR:           [Layer.OPENPYXL],
     TaskType.CHART_LINE:          [Layer.OPENPYXL],
     TaskType.CHART_PIE:           [Layer.OPENPYXL],
-    TaskType.CHART_HISTOGRAM:     [Layer.SYSTEM_EVENTS],  # cx:chart — must use UI
+    TaskType.CHART_SCATTER:       [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.CHART_AREA:          [Layer.OPENPYXL],
+    TaskType.CHART_COMBO:         [Layer.XLWINGS, Layer.SYSTEM_EVENTS],  # combo charts need live API
+    TaskType.CHART_HISTOGRAM:     [Layer.SYSTEM_EVENTS],                 # cx:chart — must use UI
+    TaskType.SPARKLINE:           [Layer.XLWINGS, Layer.SYSTEM_EVENTS],  # sparklines need live API
+
+    # ── Ranges & References ──
     TaskType.NAMED_RANGE:         [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.DATA_VALIDATION:     [Layer.OPENPYXL],
-    TaskType.SLICER:              [Layer.SYSTEM_EVENTS],  # must use ribbon UI
+    TaskType.HYPERLINK:           [Layer.OPENPYXL, Layer.XLWINGS],
+
+    # ── Advanced Features ──
+    TaskType.SLICER:              [Layer.SYSTEM_EVENTS],                 # must use ribbon UI
     TaskType.PIVOT_TABLE:         [Layer.VBA],
     TaskType.PIVOT_CHART:         [Layer.VBA],
+
+    # ── Sheet Operations ──
     TaskType.SHEET_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_RENAME:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_MOVE:          [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.CELL_VALUE:          [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
-    TaskType.MERGE_CELLS:         [Layer.OPENPYXL],
-    TaskType.BORDER:              [Layer.OPENPYXL],
-    TaskType.FILL:                [Layer.OPENPYXL],
-    TaskType.FONT:                [Layer.OPENPYXL],
+    TaskType.SHEET_COPY:          [Layer.APPLESCRIPT, Layer.XLWINGS],    # AppleScript 'duplicate' cmd
+
+    # ── File Operations ──
     TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],
     TaskType.SAVE_AS:             [Layer.APPLESCRIPT],
-    TaskType.PRINT_SETTINGS:      [Layer.OPENPYXL],
 }
 
 

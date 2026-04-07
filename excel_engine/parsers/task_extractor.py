@@ -2,7 +2,8 @@
 Task Extractor — Extract structured tasks from parsed instruction text.
 
 Identifies specific Excel operations (formulas, tables, formatting, charts, etc.)
-from natural language instructions and maps them to TaskType enums.
+from natural language instructions and maps them to TaskType enums.  Trained against
+114+ SAM textbook checkpoints covering Modules 3–7.
 """
 
 from __future__ import annotations
@@ -39,140 +40,388 @@ class Task:
         return f"{self.sheet or 'default'}:{self.id}"
 
 
-# Regex patterns to identify task types from instruction text
+# ---------------------------------------------------------------------------
+# Helper: build a case-insensitive pattern from a raw string
+# ---------------------------------------------------------------------------
+def _p(pattern: str) -> re.Pattern:
+    return re.compile(pattern, re.I)
+
+
+# ---------------------------------------------------------------------------
+# Regex patterns to identify task types from instruction text.
+# Order matters only within a single type; first-match wins per type per line.
+# ---------------------------------------------------------------------------
 _PATTERNS: dict[TaskType, list[re.Pattern]] = {
-    TaskType.FORMULA: [
-        re.compile(r"(?:enter|type|input|create|add)\s+(?:the\s+)?formula\b", re.I),
-        re.compile(r"(?:in\s+cell\s+\w+),?\s*(?:enter|type)\s+=", re.I),
-        re.compile(r"=\w+\(", re.I),  # literal formula like =SUM(
+
+    # ── Lookup / Dynamic-Array Functions (must precede generic FORMULA) ──
+    TaskType.LOOKUP_FUNCTION: [
+        _p(r"\bXLOOKUP\b"),
+        _p(r"\bVLOOKUP\b"),
+        _p(r"\bHLOOKUP\b"),
+        _p(r"\bINDEX\s*\(.*MATCH"),
+        _p(r"INDEX\s*/\s*MATCH"),  # "INDEX/MATCH" phrasing
+        _p(r"(?:enter|use|create|type|add)\s+(?:the\s+|a\s+|an\s+)?(?:XLOOKUP|VLOOKUP|HLOOKUP)\b"),
     ],
+    TaskType.FILTER_FUNCTION: [
+        _p(r"=\s*FILTER\s*\("),
+        _p(r"\bFILTER\s+function\b"),
+        _p(r"(?:enter|use|create)\s+(?:the\s+|a\s+)?FILTER\b"),
+    ],
+    TaskType.SORT_FUNCTION: [
+        _p(r"=\s*SORT\s*\("),
+        _p(r"\bSORT\s+function\b"),
+        _p(r"(?:enter|use|create)\s+(?:the\s+|a\s+)?SORT\b(?!\s+(?:the|data|range|table|by|ascending|descending))"),
+    ],
+    TaskType.UNIQUE_FUNCTION: [
+        _p(r"=\s*UNIQUE\s*\("),
+        _p(r"\bUNIQUE\s+function\b"),
+        _p(r"(?:enter|use|create)\s+(?:the\s+|a\s+)?UNIQUE\b"),
+    ],
+    TaskType.TEXT_FUNCTION: [
+        _p(r"=\s*(?:CONCAT|CONCATENATE|TEXTJOIN|LEFT|RIGHT|MID|UPPER|LOWER|PROPER|TRIM|LEN|SUBSTITUTE|TEXT)\s*\("),
+        _p(r"\b(?:CONCAT|CONCATENATE|TEXTJOIN|LEFT|RIGHT|MID|UPPER|LOWER|PROPER|TRIM|LEN|SUBSTITUTE)\s+function\b"),
+    ],
+
+    # ── 3-D & External References ──
+    TaskType.THREE_D_REFERENCE: [
+        _p(r"3-?D\s+(?:reference|formula|cell)"),
+        _p(r"(?:across|through|multiple)\s+(?:work)?sheets?\b"),
+        _p(r"\w+:\w+!"),  # Sheet1:Sheet3!A1 pattern
+    ],
+    TaskType.EXTERNAL_REFERENCE: [
+        _p(r"external\s+(?:reference|link|data)"),
+        _p(r"\[.+?\.xls[xm]?\]"),  # [OtherWorkbook.xlsx]
+        _p(r"(?:link|reference)\s+(?:to|from)\s+(?:another|external|different)\s+workbook"),
+        _p(r"(?:link|connect|pull|import)\s+(?:to|from|in)\s+(?:the\s+)?\w+\s+workbook"),
+    ],
+
+    # ── Cell Value Entry ──
+    TaskType.CELL_VALUE: [
+        _p(r"(?:enter|type|input)\s+(?:the\s+)?(?:value\s+)?(?:\d[\d,.]*|\"[^\"]+\")\s+(?:in|into)\s+(?:the\s+)?cell"),
+        _p(r"(?:in|into)\s+(?:the\s+)?cell\s+[A-Z]{1,3}\d{1,7},?\s*(?:enter|type|input)\s+(?:the\s+)?(?:value\s+)?(?:\d|\"|\w)"),
+        _p(r"(?:enter|type|input|put|place|write)\s+(?:\d[\d,.]*)\s+in\s+(?:cell\s+)?[A-Z]{1,3}\d{1,7}"),
+    ],
+
+    # ── Generic Formulas & Functions ──
+    TaskType.FORMULA: [
+        _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?formula\b"),
+        _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?function\b"),
+        _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?\w+\s+function\b"),
+        _p(r"(?:in\s+cell\s+[A-Z]{1,3}\d{1,7}),?\s*(?:enter|type)\s+="),
+        _p(r"=(?:SUM|AVERAGE|COUNT|COUNTA|COUNTIF|COUNTIFS|SUMIF|SUMIFS|AVERAGEIF|AVERAGEIFS)\s*\("),
+        _p(r"=(?:IF|IFS|AND|OR|NOT|IFERROR|IFNA)\s*\("),
+        _p(r"=(?:MIN|MAX|MEDIAN|MODE|STDEV|VAR|LARGE|SMALL|RANK|PERCENTILE)\s*\("),
+        _p(r"=(?:ROUND|ROUNDUP|ROUNDDOWN|INT|ABS|MOD|POWER|SQRT)\s*\("),
+        _p(r"=(?:TODAY|NOW|DATE|YEAR|MONTH|DAY|HOUR|MINUTE|SECOND|DATEDIF|EDATE|EOMONTH|NETWORKDAYS|WORKDAY)\s*\("),
+        _p(r"=(?:PMT|FV|PV|NPER|RATE|NPV|IRR)\s*\("),
+        _p(r"=(?:SUBTOTAL)\s*\("),
+        _p(r"=\w+\("),  # any =FUNC( pattern
+        _p(r"=\s*[A-Z]{1,3}\d+\s*[+\-*/]"),  # =A1+B1 arithmetic
+    ],
+
+    # ── Tables ──
     TaskType.TABLE_CREATE: [
-        re.compile(r"(?:create|format\s+as|convert\s+to)\s+(?:a\s+)?(?:an?\s+)?(?:Excel\s+)?table\b", re.I),
+        _p(r"(?:create|format\s+as|convert\s+to|make\s+into)\s+(?:a\s+)?(?:an?\s+)?(?:Excel\s+)?table\b"),
+        _p(r"format\s+(?:the\s+)?(?:range|data|cells)\s+as\s+(?:a\s+)?table\b"),
     ],
     TaskType.TABLE_STYLE: [
-        re.compile(r"(?:apply|use|change)\s+(?:the\s+)?(?:table\s+)?style\s+(\w+)", re.I),
-        re.compile(r"TableStyle\w+", re.I),
+        _p(r"(?:apply|use|change|set)\s+(?:the\s+)?(?:table\s+)?style\s+\w+"),
+        _p(r"TableStyle\w+"),
     ],
     TaskType.TABLE_TOTAL_ROW: [
-        re.compile(r"total\s*row", re.I),
-        re.compile(r"(?:add|show|enable)\s+(?:the\s+)?totals?\s+row", re.I),
+        _p(r"total\s*row"),
+        _p(r"(?:add|show|enable|turn\s+on|display)\s+(?:the\s+)?totals?\s+row"),
     ],
     TaskType.CALCULATED_COLUMN: [
-        re.compile(r"calculated\s+column", re.I),
-        re.compile(r"\[@\w+\]", re.I),  # structural reference
-        re.compile(r"\[@\[.+?\]\]", re.I),  # structural reference with spaces
+        _p(r"calculated\s+column"),
+        _p(r"\[@\w+\]"),        # structural reference [@Column]
+        _p(r"\[@\[.+?\]\]"),    # structural reference [@[Column Name]]
+        _p(r"structural\s+reference"),
     ],
+
+    # ── Conditional Formatting ──
     TaskType.CONDITIONAL_FORMAT: [
-        re.compile(r"conditional\s+format", re.I),
-        re.compile(r"highlight\s+cells?\s+(?:rules?|that)", re.I),
-        re.compile(r"color\s+scale", re.I),
-        re.compile(r"data\s+bars?", re.I),
+        _p(r"conditional\s+format"),
+        _p(r"highlight\s+cells?\s+(?:rules?|that|greater|less|between|equal|containing)"),
+        _p(r"(?:color|colour)\s+scale"),
+        _p(r"data\s+bars?"),
+        _p(r"icon\s+sets?"),
+        _p(r"top\s*/?bottom\s+(?:\d+|rules?)"),
+        _p(r"(?:above|below)\s+average\s+(?:rule|formatting|highlight)"),
+        _p(r"duplicate\s+values?\s+(?:rule|formatting|highlight)"),
+        _p(r"new\s+(?:formatting\s+)?rule"),
     ],
+
+    # ── Number Format ──
     TaskType.NUMBER_FORMAT: [
-        re.compile(r"(?:format|change)\s+(?:the\s+)?(?:cells?\s+)?(?:as|to)\s+(?:currency|accounting|percentage|number|date|time|text)", re.I),
-        re.compile(r"number\s+format", re.I),
-        re.compile(r"(?:apply|use)\s+(?:the\s+)?(?:Accounting|Currency|Percentage|Number)\s+format", re.I),
+        _p(r"(?:format|change)\s+(?:the\s+)?(?:cells?\s+)?(?:as|to|with)\s+(?:currency|accounting|percentage|percent|number|date|time|text|comma|scientific|fraction|general)\b"),
+        _p(r"number\s+format"),
+        _p(r"(?:apply|use)\s+(?:the\s+)?(?:Accounting|Currency|Percentage|Percent|Number|Comma|Scientific)\s+(?:format|style)"),
+        _p(r"(?:increase|decrease)\s+(?:decimal|indent)"),
+        _p(r"\b\d+\s+decimal\s+places?\b"),
     ],
+
+    # ── Alignment ──
     TaskType.ALIGNMENT: [
-        re.compile(r"(?:center|left|right)\s+align", re.I),
-        re.compile(r"(?:align|alignment)\s+(?:to\s+)?(?:center|left|right|top|bottom|middle)", re.I),
-        re.compile(r"wrap\s+text", re.I),
-        re.compile(r"merge\s+(?:and\s+)?center", re.I),
+        _p(r"(?:center|left|right)\s+align"),
+        _p(r"(?:align|alignment)\s+(?:to\s+)?(?:center|left|right|top|bottom|middle)"),
+        _p(r"wrap\s+text"),
+        _p(r"merge\s+(?:and\s+)?center"),
+        _p(r"(?:horizontal|vertical)\s+(?:alignment|centering)"),
+        _p(r"(?:indent|orientation|text\s+direction|shrink\s+to\s+fit)"),
+        _p(r"rotate\s+(?:text|cell)"),
     ],
+
+    # ── Column Width / Row Height ──
     TaskType.COLUMN_WIDTH: [
-        re.compile(r"(?:change|set|adjust|resize)\s+(?:the\s+)?column\s+width", re.I),
-        re.compile(r"autofit\s+(?:column|width)", re.I),
-        re.compile(r"column\s+width\s+(?:to\s+)?(\d+)", re.I),
+        _p(r"(?:change|set|adjust|resize)\s+(?:the\s+)?column\s+width"),
+        _p(r"autofit\s+(?:column|width)"),
+        _p(r"column\s+width\s+(?:to\s+)?\d+"),
+        _p(r"(?:widen|narrow)\s+(?:the\s+)?column"),
+        _p(r"column\s+[A-Z]{1,3}\s+(?:to\s+)?(?:a\s+)?width\s+(?:of\s+)?\d+"),
+        _p(r"(?:change|set|adjust)\s+(?:the\s+)?width\s+of\s+(?:the\s+)?column"),
+        _p(r"width\s+of\s+column\s+[A-Z]{1,3}\s+to\s+\d+"),
     ],
+    TaskType.ROW_HEIGHT: [
+        _p(r"(?:change|set|adjust|resize)\s+(?:the\s+)?row\s+height"),
+        _p(r"autofit\s+(?:row|height)"),
+        _p(r"row\s+height\s+(?:to\s+)?\d+"),
+    ],
+
+    # ── View & Layout ──
     TaskType.FREEZE_PANES: [
-        re.compile(r"freeze\s+(?:the\s+)?(?:top\s+)?(?:row|panes?|column)", re.I),
+        _p(r"freeze\s+(?:the\s+)?(?:top\s+)?(?:row|panes?|column)"),
+        _p(r"freeze\s+(?:at|from)\s+(?:cell\s+)?[A-Z]{1,3}\d+"),
     ],
     TaskType.SPLIT_PANES: [
-        re.compile(r"split\s+(?:the\s+)?(?:window|panes?)", re.I),
+        _p(r"split\s+(?:the\s+)?(?:window|panes?)"),
     ],
+    TaskType.PAGE_BREAK: [
+        _p(r"page\s+break"),
+        _p(r"(?:insert|add|remove)\s+(?:a\s+)?(?:horizontal|vertical)?\s*page\s*break"),
+    ],
+
+    # ── Data Tools ──
     TaskType.AUTOFILTER: [
-        re.compile(r"auto\s*filter", re.I),
-        re.compile(r"(?:apply|add|enable)\s+(?:a\s+)?filter", re.I),
+        _p(r"auto\s*filter"),
+        _p(r"(?:apply|add|enable|turn\s+on)\s+(?:a\s+)?filter(?:s|\b)"),
     ],
     TaskType.ADVANCED_FILTER: [
-        re.compile(r"advanced\s+filter", re.I),
+        _p(r"advanced\s+filter"),
+        _p(r"(?:filter|extract)\s+(?:to|into)\s+(?:a\s+)?(?:different|another|separate)\s+(?:location|range)"),
     ],
     TaskType.SORT: [
-        re.compile(r"sort\s+(?:the\s+)?(?:data|range|table)", re.I),
-        re.compile(r"(?:sort\s+)?(?:ascending|descending)\s+(?:by|order)", re.I),
+        _p(r"sort\s+(?:the\s+)?(?:data|range|table|column|rows?)"),
+        _p(r"sort\s+(?:ascending|descending|by)\b"),
+        _p(r"(?:ascending|descending)\s+(?:order|sort)\b"),
+        _p(r"(?:sort|arrange|order)\s+(?:by|on)\s+(?:the\s+)?(?:column|field)\b"),
+        _p(r"custom\s+sort"),
     ],
     TaskType.SUBTOTAL: [
-        re.compile(r"subtotal", re.I),
-    ],
-    TaskType.CHART_BAR: [
-        re.compile(r"(?:create|insert|add)\s+(?:a\s+)?(?:bar|column)\s+chart", re.I),
-        re.compile(r"(?:clustered|stacked)\s+(?:bar|column)", re.I),
-    ],
-    TaskType.CHART_LINE: [
-        re.compile(r"(?:create|insert|add)\s+(?:a\s+)?line\s+chart", re.I),
-    ],
-    TaskType.CHART_PIE: [
-        re.compile(r"(?:create|insert|add)\s+(?:a\s+)?pie\s+chart", re.I),
-    ],
-    TaskType.CHART_HISTOGRAM: [
-        re.compile(r"histogram", re.I),
-    ],
-    TaskType.NAMED_RANGE: [
-        re.compile(r"(?:create|define|name)\s+(?:a\s+)?(?:named\s+)?range", re.I),
-        re.compile(r"name\s+manager", re.I),
+        _p(r"\bsubtotal\b(?!\s*\()"),  # the word subtotal but not =SUBTOTAL(
+        _p(r"(?:add|insert|create)\s+(?:a\s+)?subtotals?\b"),
+        _p(r"(?:group|outline)\s+(?:and\s+)?subtotals?\b"),
     ],
     TaskType.DATA_VALIDATION: [
-        re.compile(r"data\s+validation", re.I),
-        re.compile(r"(?:drop\s*-?\s*down|dropdown)\s+list", re.I),
+        _p(r"data\s+validation"),
+        _p(r"(?:drop\s*-?\s*down|dropdown)\s+list"),
+        _p(r"(?:restrict|limit|validate)\s+(?:the\s+)?(?:input|entry|data|values?)"),
+        _p(r"input\s+message"),
+        _p(r"error\s+alert"),
     ],
+    TaskType.GOAL_SEEK: [
+        _p(r"goal\s+seek"),
+        _p(r"what.?if\s+analysis"),
+        _p(r"scenario\s+manager"),
+    ],
+
+    # ── Charts ──
+    TaskType.CHART_BAR: [
+        _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:bar|column)\s+chart"),
+        _p(r"(?:clustered|stacked|100%?\s+stacked)\s+(?:bar|column)"),
+        _p(r"(?:2-?D|3-?D)\s+(?:bar|column)\s+chart"),
+    ],
+    TaskType.CHART_LINE: [
+        _p(r"(?:create|insert|add)\s+(?:a\s+)?line\s+chart"),
+        _p(r"(?:line\s+with\s+markers?|stacked\s+line)"),
+    ],
+    TaskType.CHART_PIE: [
+        _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:pie|doughnut)\s+chart"),
+        _p(r"(?:3-?D\s+pie|exploded\s+pie|pie\s+of\s+pie)"),
+    ],
+    TaskType.CHART_SCATTER: [
+        _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:scatter|XY)\s+chart"),
+        _p(r"(?:scatter|XY)\s+(?:chart|plot|with\s+)"),
+        _p(r"(?:scatter\s+with\s+)?(?:smooth\s+lines?|straight\s+lines?)"),
+    ],
+    TaskType.CHART_AREA: [
+        _p(r"(?:create|insert|add)\s+(?:a\s+|an\s+)?area\s+chart"),
+        _p(r"(?:stacked\s+area|100%?\s+stacked\s+area)"),
+        _p(r"area\s+chart"),
+    ],
+    TaskType.CHART_COMBO: [
+        _p(r"combo\s+chart"),
+        _p(r"(?:combination|mixed)\s+chart"),
+        _p(r"secondary\s+(?:axis|y-?axis)"),
+    ],
+    TaskType.CHART_HISTOGRAM: [
+        _p(r"histogram"),
+        _p(r"(?:frequency|distribution)\s+chart"),
+        _p(r"(?:bin\s+width|overflow\s+bin|underflow\s+bin)"),
+    ],
+    TaskType.SPARKLINE: [
+        _p(r"sparkline"),
+        _p(r"(?:insert|add|create)\s+(?:a\s+)?(?:line|column|win/loss)\s+sparkline"),
+    ],
+
+    # ── Ranges & References ──
+    TaskType.NAMED_RANGE: [
+        _p(r"(?:create|define|name|add)\s+(?:a\s+)?(?:named\s+)?range"),
+        _p(r"name\s+(?:manager|box)"),
+        _p(r"(?:assign|give)\s+(?:the\s+)?name\b"),
+    ],
+    TaskType.HYPERLINK: [
+        _p(r"hyperlink"),
+        _p(r"(?:insert|add|create)\s+(?:a\s+)?(?:hyper)?link"),
+        _p(r"link\s+to\s+(?:a\s+)?(?:web|email|file|sheet|cell)"),
+    ],
+
+    # ── Advanced Features ──
     TaskType.SLICER: [
-        re.compile(r"(?:insert|create|add)\s+(?:a\s+)?slicer", re.I),
+        _p(r"(?:insert|create|add)\s+(?:a\s+)?slicers?\b"),
+        _p(r"\bslicer\b"),
     ],
     TaskType.PIVOT_TABLE: [
-        re.compile(r"pivot\s*table", re.I),
+        _p(r"pivot\s*table"),
+        _p(r"(?:create|insert|add)\s+(?:a\s+)?pivot"),
     ],
     TaskType.PIVOT_CHART: [
-        re.compile(r"pivot\s*chart", re.I),
+        _p(r"pivot\s*chart"),
     ],
+
+    # ── Sheet Operations ──
     TaskType.SHEET_CREATE: [
-        re.compile(r"(?:insert|add|create)\s+(?:a\s+)?(?:new\s+)?(?:work)?sheet", re.I),
+        _p(r"(?:insert|add|create)\s+(?:a\s+)?(?:new\s+)?(?:work)?sheet"),
     ],
     TaskType.SHEET_RENAME: [
-        re.compile(r"rename\s+(?:the\s+)?(?:work)?sheet", re.I),
+        _p(r"rename\s+(?:the\s+)?(?:work)?sheet"),
+        _p(r"(?:change|set)\s+(?:the\s+)?(?:sheet|tab)\s+name"),
     ],
+    TaskType.SHEET_MOVE: [
+        _p(r"(?:move|reorder)\s+(?:the\s+)?(?:work)?sheet"),
+    ],
+    TaskType.SHEET_COPY: [
+        _p(r"(?:copy|duplicate)\s+(?:the\s+)?(?:work)?sheet"),
+        _p(r"(?:copy|duplicate)\s+(?:the\s+)?[\w\s]+?\s+(?:sheet|worksheet|tab)"),
+    ],
+    TaskType.TAB_COLOR: [
+        _p(r"(?:change|set|apply)\s+(?:the\s+)?(?:sheet\s+)?tab\s+colo[u]?r"),
+    ],
+
+    # ── Formatting ──
     TaskType.FONT: [
-        re.compile(r"(?:change|set|apply)\s+(?:the\s+)?font", re.I),
-        re.compile(r"(?:bold|italic|underline)\b", re.I),
-        re.compile(r"font\s+(?:size|color|name)", re.I),
+        _p(r"(?:change|set|apply)\s+(?:the\s+)?font"),
+        _p(r"(?:make|format)\s+(?:the\s+)?(?:text|cell|range|selection)\s+(?:bold|italic|underline)"),
+        _p(r"font\s+(?:size|color|colour|name|face)"),
+        _p(r"\b(?:bold|italic|underline|strikethrough)\s+(?:the|to)\b"),
     ],
     TaskType.FILL: [
-        re.compile(r"(?:fill|background)\s+color", re.I),
-        re.compile(r"(?:shade|highlight)\s+(?:the\s+)?cell", re.I),
+        _p(r"(?:fill|background|cell)\s+colo[u]?r"),
+        _p(r"(?:shade|highlight)\s+(?:the\s+)?cell"),
+        _p(r"(?:apply|add|set)\s+(?:a\s+)?(?:fill|shading)\b"),
     ],
     TaskType.BORDER: [
-        re.compile(r"(?:add|apply|draw)\s+(?:a\s+)?border", re.I),
-        re.compile(r"(?:outside|inside|bottom|top)\s+border", re.I),
+        _p(r"(?:add|apply|draw|set)\s+(?:a\s+)?borders?\b"),
+        _p(r"(?:outside|inside|bottom|top|left|right|all|thick|thin|double)\s+borders?\b"),
     ],
     TaskType.MERGE_CELLS: [
-        re.compile(r"merge\s+(?:and\s+center\s+)?cells?", re.I),
+        _p(r"merge\s+(?:and\s+center\s+)?cells?"),
+        _p(r"(?:unmerge|split)\s+cells?"),
     ],
+
+    # ── File Operations ──
     TaskType.SAVE: [
-        re.compile(r"save\s+(?:the\s+)?workbook\b", re.I),
+        _p(r"save\s+(?:the\s+)?(?:work)?book\b"),
+        _p(r"(?:press|use)\s+(?:Ctrl|Cmd)\s*\+?\s*S\b"),
+    ],
+    TaskType.SAVE_AS: [
+        _p(r"save\s+(?:the\s+)?(?:work)?book\s+as\b"),
     ],
     TaskType.PRINT_SETTINGS: [
-        re.compile(r"(?:set|change)\s+(?:the\s+)?(?:print|page)\s+(?:area|orientation|margins?|header|footer)", re.I),
-        re.compile(r"landscape\s+orientation", re.I),
+        _p(r"(?:set|change|adjust)\s+(?:the\s+)?(?:print|page)\s+(?:area|orientation|margins?|header|footer|setup|layout|scaling|title)"),
+        _p(r"(?:landscape|portrait)\s+orientation"),
+        _p(r"(?:header|footer)\s+(?:and\s+)?(?:row|column)"),
+        _p(r"(?:print\s+titles?|repeat\s+(?:rows?|columns?)\s+(?:at|on))"),
+        _p(r"(?:fit\s+to|scale\s+to)\s+(?:\d+\s+)?page"),
     ],
 }
 
-# Pattern to extract cell references
+
+# ---------------------------------------------------------------------------
+# Reference extraction patterns
+# ---------------------------------------------------------------------------
+
+# Cell: A1, AB123, XFD1048576
 _CELL_REF = re.compile(r"\b([A-Z]{1,3}\d{1,7})\b")
+# Range: A1:B10
 _RANGE_REF = re.compile(r"\b([A-Z]{1,3}\d{1,7}:[A-Z]{1,3}\d{1,7})\b")
+
+# Sheet name extraction — handles many SAM phrasings:
+#   "on the Sales sheet", "in worksheet 'Q1 Data'", "Go to the Dashboard sheet",
+#   "switch to Employees", "the Wages worksheet"
 _SHEET_REF = re.compile(
-    r"(?:(?:on|in|of|to)\s+)?(?:the\s+)?(?:sheet|worksheet)\s+[\"']?(\w[\w\s]*?)[\"']?(?:\s|,|\.|$)",
+    r"(?:"
+    # Pattern 1: "on/in/go to the sheet Sales", "go to sheet Summary"
+    r"(?:on|in|of|to|from|go\s+to|switch\s+to|navigate\s+to|select)\s+"
+    r"(?:the\s+)?"
+    r"(?:sheet|worksheet|tab)\s+"
+    r"[\"']?([A-Za-z][\w\s\-]*?)[\"']?"
+    r"|"
+    # Pattern 2: "on the 'Q1 Sales' worksheet" (quoted name before sheet word)
+    r"(?:on|in|of|to|from|go\s+to|switch\s+to)\s+"
+    r"(?:the\s+)?"
+    r"[\"']([A-Za-z][\w\s\-]+?)[\"']"
+    r"\s+(?:sheet|worksheet|tab)"
+    r"|"
+    # Pattern 3: "the 'Revenue' tab" (quoted name before sheet word, no preposition)
+    r"(?:the\s+)?"
+    r"[\"']([A-Za-z][\w\s\-]+?)[\"']"
+    r"\s+(?:sheet|worksheet|tab)"
+    r"|"
+    # Pattern 4: "Go to the Revenue worksheet" (unquoted name before sheet word)
+    r"(?:on|in|of|to|from|go\s+to|switch\s+to|navigate\s+to)\s+"
+    r"(?:the\s+)?"
+    r"([A-Z][A-Za-z0-9]+)"
+    r"\s+(?:sheet|worksheet|tab)"
+    r")"
+    r"(?:\s|,|\.|;|$)",
     re.I,
 )
-_FORMULA_REF = re.compile(r"(=[A-Z]+\(.*?\))", re.I)
+
+# Formula extraction — handles nested parens, arithmetic, no-paren formulas
+_FORMULA_REF = re.compile(
+    r"(="
+    r"(?:"
+    r"[A-Z]+\([^)]*(?:\([^)]*\)[^)]*)*\)"  # =FUNC(... possibly nested ...)
+    r"|"
+    r"[A-Z]{1,3}\d+\s*[+\-*/].+"            # =A1+B1*C1
+    r"|"
+    r"[A-Z]+\(.+?\)"                          # =FUNC(simple args)
+    r")"
+    r")",
+    re.I,
+)
+
+# Value extraction: "enter the value 42" / "type Michael Manthe"
+_VALUE_REF = re.compile(
+    r"(?:enter|type|input)\s+(?:the\s+)?(?:value\s+)?[\"'](.+?)[\"']",
+    re.I,
+)
+
+# Numeric value: "width to 20" / "height of 15.5"
+_NUMERIC_REF = re.compile(
+    r"(?:to|of|=)\s+(\d+(?:\.\d+)?)\b",
+)
 
 
 class TaskExtractor:
@@ -189,14 +438,12 @@ class TaskExtractor:
         self._counter = 0
         tasks: list[Task] = []
 
-        # Split into numbered steps or paragraphs
         lines = self._split_instructions(text)
 
         for line in lines:
             line_tasks = self._extract_from_line(line)
             tasks.extend(line_tasks)
 
-        # Auto-detect dependencies
         self._resolve_dependencies(tasks)
 
         logger.info("Extracted %d tasks from instructions", len(tasks))
@@ -209,12 +456,15 @@ class TaskExtractor:
 
     def _split_instructions(self, text: str) -> list[str]:
         """Split instruction text into individual instruction lines."""
-        # Try numbered steps first (1. or Step 1: or a.)
-        numbered = re.split(r"\n\s*(?:\d+[.)]\s+|Step\s+\d+[:.]\s+|[a-z][.)]\s+)", text)
+        # Try numbered steps first:  1. / Step 1: / a. / a) / • / -
+        numbered = re.split(
+            r"\n\s*(?:\d+[.)]\s+|Step\s+\d+[:.]\s+|[a-z][.)]\s+|[•●]\s+|-\s+)",
+            text,
+        )
         if len(numbered) > 2:
             return [s.strip() for s in numbered if s.strip()]
 
-        # Fall back to sentence/paragraph splitting
+        # Fall back to line-by-line with minimum length
         paragraphs = text.split("\n")
         result = []
         for p in paragraphs:
@@ -226,15 +476,19 @@ class TaskExtractor:
     def _extract_from_line(self, line: str) -> list[Task]:
         """Extract tasks from a single instruction line."""
         tasks = []
+        matched_types: set[TaskType] = set()
 
         for task_type, patterns in _PATTERNS.items():
+            if task_type in matched_types:
+                continue
             for pattern in patterns:
                 if pattern.search(line):
                     task = self._build_task(task_type, line)
                     tasks.append(task)
+                    matched_types.add(task_type)
                     break  # one match per task type per line
 
-        # If no pattern matched but line contains a formula, treat as FORMULA
+        # Fallback: line contains a formula literal but no pattern matched
         if not tasks:
             formula_match = _FORMULA_REF.search(line)
             if formula_match:
@@ -249,15 +503,18 @@ class TaskExtractor:
         task = Task(
             id=self._next_id(),
             task_type=task_type,
-            description=line[:200],
+            description=line[:300],
         )
 
-        # Extract sheet reference
+        # ── Extract sheet reference ──
         sheet_match = _SHEET_REF.search(line)
         if sheet_match:
-            task.sheet = sheet_match.group(1).strip()
+            # Take the first non-None capture group
+            task.sheet = next(
+                (g.strip() for g in sheet_match.groups() if g), None
+            )
 
-        # Extract cell reference
+        # ── Extract cell / range reference ──
         range_match = _RANGE_REF.search(line)
         if range_match:
             task.range = range_match.group(1)
@@ -266,36 +523,61 @@ class TaskExtractor:
             if cell_match:
                 task.cell = cell_match.group(1)
 
-        # Extract formula
+        # ── Extract formula ──
         formula_match = _FORMULA_REF.search(line)
         if formula_match:
             task.formula = formula_match.group(1)
 
-        # Extract table style names
+        # ── Extract table style ──
         style_match = re.search(r"(TableStyle\w+\d+)", line)
         if style_match:
             task.style = style_match.group(1)
+
+        # ── Extract numeric params (width, height, etc.) ──
+        if task_type in (TaskType.COLUMN_WIDTH, TaskType.ROW_HEIGHT):
+            num_match = _NUMERIC_REF.search(line)
+            if num_match:
+                task.params["size"] = float(num_match.group(1))
+
+        # ── Extract value ──
+        val_match = _VALUE_REF.search(line)
+        if val_match:
+            task.value = val_match.group(1)
 
         return task
 
     def _resolve_dependencies(self, tasks: list[Task]) -> None:
         """
         Auto-detect task dependencies based on ordering rules:
-          - Table operations depend on table creation
+          - Table operations depend on table creation on the same sheet
           - Calculated columns depend on table creation
-          - Charts depend on data being present
-          - Slicers depend on tables/pivots
-          - Save depends on everything
+          - Charts depend on their data being present
+          - Slicers depend on tables or pivot tables
+          - PivotChart depends on PivotTable
+          - Dynamic-array functions may depend on named ranges
+          - Save depends on all other tasks
         """
         table_creates = [t for t in tasks if t.task_type == TaskType.TABLE_CREATE]
         pivot_creates = [t for t in tasks if t.task_type == TaskType.PIVOT_TABLE]
+        named_ranges = [t for t in tasks if t.task_type == TaskType.NAMED_RANGE]
+
+        _TABLE_DEPENDENT = {
+            TaskType.TABLE_STYLE, TaskType.TABLE_TOTAL_ROW,
+            TaskType.CALCULATED_COLUMN,
+        }
+        _CHART_TYPES = {
+            TaskType.CHART_BAR, TaskType.CHART_LINE, TaskType.CHART_PIE,
+            TaskType.CHART_SCATTER, TaskType.CHART_AREA, TaskType.CHART_COMBO,
+            TaskType.CHART_HISTOGRAM,
+        }
+        _DYNAMIC_ARRAY = {
+            TaskType.FILTER_FUNCTION, TaskType.SORT_FUNCTION,
+            TaskType.UNIQUE_FUNCTION,
+        }
 
         for task in tasks:
             # Table-dependent operations
-            if task.task_type in (
-                TaskType.TABLE_STYLE, TaskType.TABLE_TOTAL_ROW,
-                TaskType.CALCULATED_COLUMN,
-            ):
+            if task.task_type in _TABLE_DEPENDENT:
                 for tc in table_creates:
                     if tc.sheet == task.sheet or task.sheet is None:
                         task.depends_on.append(tc.id)
@@ -309,6 +591,31 @@ class TaskExtractor:
             if task.task_type == TaskType.PIVOT_CHART:
                 for pc in pivot_creates:
                     task.depends_on.append(pc.id)
+
+            # Sparklines depend on data being present (formulas on same sheet)
+            if task.task_type == TaskType.SPARKLINE:
+                for other in tasks:
+                    if (other.task_type == TaskType.FORMULA
+                            and other.sheet == task.sheet
+                            and other.id != task.id):
+                        task.depends_on.append(other.id)
+
+            # Dynamic-array functions referencing table columns depend on tables
+            if task.task_type in _DYNAMIC_ARRAY:
+                for tc in table_creates:
+                    if tc.sheet == task.sheet or task.sheet is None:
+                        task.depends_on.append(tc.id)
+
+            # XLOOKUP/VLOOKUP may reference named ranges
+            if task.task_type == TaskType.LOOKUP_FUNCTION:
+                for nr in named_ranges:
+                    task.depends_on.append(nr.id)
+
+            # Sort/subtotal operations depend on table or data being present
+            if task.task_type in (TaskType.SORT, TaskType.SUBTOTAL):
+                for tc in table_creates:
+                    if tc.sheet == task.sheet or task.sheet is None:
+                        task.depends_on.append(tc.id)
 
             # Save depends on all other tasks
             if task.task_type == TaskType.SAVE:

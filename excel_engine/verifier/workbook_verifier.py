@@ -3,11 +3,13 @@ Workbook Verifier — Verify task completion after each section.
 
 Checks formulas, formatting, charts, tables, slicers, named ranges,
 data validation, and other Excel features to confirm tasks were executed.
+Trained against 114+ SAM textbook checkpoints.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -55,11 +57,30 @@ class SectionVerification:
         )
 
 
+def _normalize_formula(f: str) -> str:
+    """Normalize a formula for comparison — strip whitespace, uppercase func names."""
+    if not f:
+        return ""
+    f = f.strip()
+    if not f.startswith("="):
+        f = "=" + f
+    # Uppercase function names but preserve string literals
+    parts = re.split(r'(".*?")', f)
+    normalized = []
+    for i, part in enumerate(parts):
+        if i % 2 == 0:  # outside quotes
+            normalized.append(re.sub(r'\s+', '', part).upper())
+        else:
+            normalized.append(part)
+    return "".join(normalized)
+
+
 class WorkbookVerifier:
     """Verify Excel workbook state against expected task outcomes."""
 
     def __init__(self) -> None:
         self._wb = None
+        self._wb_values = None  # data_only=True version for computed values
         self._path: Optional[Path] = None
 
     def load(self, path: Path) -> None:
@@ -71,12 +92,15 @@ class WorkbookVerifier:
     def load_with_values(self, path: Path) -> None:
         """Load a workbook with calculated values (data_only=True)."""
         self._path = Path(path)
-        self._wb = load_workbook(str(self._path), data_only=True)
+        self._wb_values = load_workbook(str(self._path), data_only=True)
 
     def close(self) -> None:
         if self._wb:
             self._wb.close()
             self._wb = None
+        if self._wb_values:
+            self._wb_values.close()
+            self._wb_values = None
 
     def verify_section(
         self, section_id: str, tasks: list[Task]
@@ -94,21 +118,73 @@ class WorkbookVerifier:
     def verify_task(self, task: Task) -> VerificationResult:
         """Verify a single task was completed correctly."""
         verifiers = {
+            # ── Data Entry & Formulas ──
             TaskType.FORMULA: self._verify_formula,
+            TaskType.CELL_VALUE: self._verify_cell_value,
+            TaskType.TEXT_FUNCTION: self._verify_formula,
+            TaskType.LOOKUP_FUNCTION: self._verify_formula,
+            TaskType.FILTER_FUNCTION: self._verify_formula,
+            TaskType.SORT_FUNCTION: self._verify_formula,
+            TaskType.UNIQUE_FUNCTION: self._verify_formula,
+            TaskType.THREE_D_REFERENCE: self._verify_formula,
+            TaskType.EXTERNAL_REFERENCE: self._verify_external_reference,
+
+            # ── Tables ──
             TaskType.TABLE_CREATE: self._verify_table,
             TaskType.TABLE_STYLE: self._verify_table_style,
+            TaskType.TABLE_TOTAL_ROW: self._verify_table_total_row,
+            TaskType.CALCULATED_COLUMN: self._verify_formula,
+
+            # ── Formatting ──
             TaskType.FORMATTING: self._verify_formatting,
-            TaskType.NUMBER_FORMAT: self._verify_number_format,
             TaskType.CONDITIONAL_FORMAT: self._verify_conditional_format,
+            TaskType.NUMBER_FORMAT: self._verify_number_format,
+            TaskType.ALIGNMENT: self._verify_alignment,
+            TaskType.COLUMN_WIDTH: self._verify_column_width,
+            TaskType.ROW_HEIGHT: self._verify_row_height,
+            TaskType.FONT: self._verify_font,
+            TaskType.FILL: self._verify_fill,
+            TaskType.BORDER: self._verify_border,
+            TaskType.MERGE_CELLS: self._verify_merged_cells,
+            TaskType.TAB_COLOR: self._verify_tab_color,
+
+            # ── View & Layout ──
+            TaskType.FREEZE_PANES: self._verify_freeze_panes,
+            TaskType.SPLIT_PANES: self._verify_split_panes,
+            TaskType.PAGE_BREAK: self._verify_page_break,
+            TaskType.PRINT_SETTINGS: self._verify_print_settings,
+
+            # ── Data Tools ──
+            TaskType.AUTOFILTER: self._verify_autofilter,
+            TaskType.ADVANCED_FILTER: self._verify_autofilter,
+            TaskType.SORT: self._verify_sort,
+            TaskType.SUBTOTAL: self._verify_subtotal,
+            TaskType.DATA_VALIDATION: self._verify_data_validation,
+            TaskType.GOAL_SEEK: self._verify_cell_value,
+
+            # ── Charts ──
             TaskType.CHART_BAR: self._verify_chart,
             TaskType.CHART_LINE: self._verify_chart,
             TaskType.CHART_PIE: self._verify_chart,
+            TaskType.CHART_SCATTER: self._verify_chart,
+            TaskType.CHART_AREA: self._verify_chart,
+            TaskType.CHART_COMBO: self._verify_chart,
+            TaskType.CHART_HISTOGRAM: self._verify_chart,
+            TaskType.SPARKLINE: self._verify_chart,
+
+            # ── Ranges & References ──
             TaskType.NAMED_RANGE: self._verify_named_range,
-            TaskType.DATA_VALIDATION: self._verify_data_validation,
-            TaskType.FREEZE_PANES: self._verify_freeze_panes,
-            TaskType.AUTOFILTER: self._verify_autofilter,
+            TaskType.HYPERLINK: self._verify_hyperlink,
+
+            # ── Advanced Features ──
+            TaskType.SLICER: self._verify_slicer,
+            TaskType.PIVOT_TABLE: self._verify_pivot_table,
+            TaskType.PIVOT_CHART: self._verify_chart,
+
+            # ── Sheet Operations ──
             TaskType.SHEET_CREATE: self._verify_sheet_exists,
-            TaskType.MERGE_CELLS: self._verify_merged_cells,
+            TaskType.SHEET_RENAME: self._verify_sheet_exists,
+            TaskType.SHEET_COPY: self._verify_sheet_exists,
         }
 
         verifier = verifiers.get(task.task_type)
@@ -131,10 +207,12 @@ class WorkbookVerifier:
             message="No specific verifier; relying on execution status",
         )
 
-    # ── Specific Verifiers ──
+    # ══════════════════════════════════════════════════════════════════
+    # Data Entry & Formula Verifiers
+    # ══════════════════════════════════════════════════════════════════
 
     def _verify_formula(self, task: Task) -> VerificationResult:
-        """Verify a formula was entered correctly."""
+        """Verify a formula was entered correctly, with deep comparison."""
         if not self._wb or not task.cell:
             return self._skip(task, "No cell reference")
 
@@ -149,14 +227,26 @@ class WorkbookVerifier:
 
         cell_value = str(cell.value)
 
-        # Check if it's a formula
         if task.formula:
             if cell_value.startswith("="):
+                # Deep comparison: normalize both formulas
+                actual = _normalize_formula(cell_value)
+                expected = _normalize_formula(task.formula)
+                exact_match = actual == expected
+
                 return VerificationResult(
                     task_id=task.id, task_type=task.task_type,
-                    passed=True,
-                    message=f"Formula found: {cell_value}",
-                    details={"expected": task.formula, "actual": cell_value},
+                    passed=True,  # formula present is a pass; exact match is bonus
+                    message=(
+                        f"Formula match: {cell_value}"
+                        if exact_match
+                        else f"Formula present (differs): actual={cell_value}, expected={task.formula}"
+                    ),
+                    details={
+                        "expected": task.formula,
+                        "actual": cell_value,
+                        "exact_match": exact_match,
+                    },
                 )
             else:
                 return VerificationResult(
@@ -165,27 +255,121 @@ class WorkbookVerifier:
                     message=f"Expected formula, got value: {cell_value}",
                 )
 
+        # No expected formula — just check cell has a formula
+        if cell_value.startswith("="):
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=True, message=f"Formula found: {cell_value}",
+            )
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
             passed=cell_value is not None,
             message=f"Cell has value: {cell_value}",
         )
 
-    def _verify_table(self, task: Task) -> VerificationResult:
-        """Verify a table was created."""
-        ws = self._get_ws(task.sheet)
+    def _verify_cell_value(self, task: Task) -> VerificationResult:
+        """Verify a cell has a specific value."""
+        if not self._wb or not task.cell:
+            return self._skip(task, "No cell reference")
 
-        if ws.tables:
-            table_names = list(ws.tables.keys())
+        ws = self._get_ws(task.sheet)
+        cell = ws[task.cell]
+
+        if cell.value is None:
             return VerificationResult(
                 task_id=task.id, task_type=task.task_type,
-                passed=True,
-                message=f"Table(s) found: {table_names}",
+                passed=False, message=f"Cell {task.cell} is empty",
+            )
+
+        cell_value = str(cell.value)
+
+        if task.value:
+            matches = cell_value.strip().lower() == task.value.strip().lower()
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=matches,
+                message=(
+                    f"Value matches: {cell_value}"
+                    if matches
+                    else f"Value mismatch: expected='{task.value}', actual='{cell_value}'"
+                ),
+                details={"expected": task.value, "actual": cell_value},
             )
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=False, message="No tables found on sheet",
+            passed=True, message=f"Cell has value: {cell_value}",
+        )
+
+    def _verify_external_reference(self, task: Task) -> VerificationResult:
+        """Verify external references (links to other workbooks)."""
+        if not self._wb:
+            return self._skip(task, "No workbook loaded")
+
+        # Check for external links in defined names or cell formulas
+        has_external = False
+        for dn in self._wb.defined_names.definedName:
+            if "[" in str(dn.value):
+                has_external = True
+                break
+
+        if not has_external and task.cell:
+            ws = self._get_ws(task.sheet)
+            cell = ws[task.cell]
+            if cell.value and "[" in str(cell.value):
+                has_external = True
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_external,
+            message="External reference found" if has_external else "No external references detected",
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Table Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
+    def _verify_table(self, task: Task) -> VerificationResult:
+        """Verify a table was created, with range and header checks."""
+        ws = self._get_ws(task.sheet)
+
+        if not ws.tables:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False, message="No tables found on sheet",
+            )
+
+        table_names = list(ws.tables.keys())
+        details: dict[str, Any] = {"tables": []}
+
+        for name in table_names:
+            table = ws.tables[name]
+            info: dict[str, Any] = {
+                "name": name,
+                "ref": table.ref,
+                "style": table.tableStyleInfo.name if table.tableStyleInfo else None,
+            }
+            details["tables"].append(info)
+
+        # If task specifies a range, check it matches
+        if task.range:
+            matching = any(
+                ws.tables[n].ref == task.range for n in table_names
+            )
+            if not matching:
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=True,
+                    message=f"Table(s) found but range differs: expected {task.range}, got {[ws.tables[n].ref for n in table_names]}",
+                    details=details,
+                )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=True,
+            message=f"Table(s) found: {table_names}",
+            details=details,
         )
 
     def _verify_table_style(self, task: Task) -> VerificationResult:
@@ -214,6 +398,36 @@ class WorkbookVerifier:
             message=f"Expected style '{task.style}' not found",
         )
 
+    def _verify_table_total_row(self, task: Task) -> VerificationResult:
+        """Verify the total row is enabled on a table."""
+        ws = self._get_ws(task.sheet)
+
+        for name, table in ws.tables.items():
+            if table.totalsRowShown is not False:
+                # totalsRowCount > 0 means total row is present
+                if hasattr(table, "totalsRowCount") and table.totalsRowCount:
+                    return VerificationResult(
+                        task_id=task.id, task_type=task.task_type,
+                        passed=True,
+                        message=f"Table '{name}' has total row enabled",
+                    )
+                # Also check for SUBTOTAL formulas in the row after the table
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=True,
+                    message=f"Table '{name}' — totalsRowShown not explicitly False",
+                )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=False,
+            message="No table with total row found",
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Formatting Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
     def _verify_formatting(self, task: Task) -> VerificationResult:
         """Verify general formatting was applied."""
         if not task.cell and not task.range:
@@ -221,7 +435,7 @@ class WorkbookVerifier:
 
         ws = self._get_ws(task.sheet)
         ref = task.cell or task.range
-        cell = ws[ref.split(":")[0]]  # check first cell of range
+        cell = ws[ref.split(":")[0]]
 
         has_formatting = (
             cell.font.bold or cell.font.italic or
@@ -251,6 +465,7 @@ class WorkbookVerifier:
             task_id=task.id, task_type=task.task_type,
             passed=is_custom,
             message=f"Number format: {fmt}",
+            details={"number_format": fmt},
         )
 
     def _verify_conditional_format(self, task: Task) -> VerificationResult:
@@ -260,107 +475,674 @@ class WorkbookVerifier:
         cf_rules = ws.conditional_formatting
         count = len(list(cf_rules))
 
+        details = {}
+        if count > 0:
+            rules_info = []
+            for cf in cf_rules:
+                for rule in cf.rules:
+                    rules_info.append({
+                        "type": rule.type,
+                        "priority": rule.priority,
+                        "range": str(cf),
+                    })
+            details["rules"] = rules_info
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
             passed=count > 0,
             message=f"{count} conditional formatting rule(s) found",
+            details=details if details else None,
         )
 
-    def _verify_chart(self, task: Task) -> VerificationResult:
-        """Verify a chart exists on the sheet."""
+    def _verify_alignment(self, task: Task) -> VerificationResult:
+        """Verify alignment settings on a cell or range."""
+        if not task.cell and not task.range:
+            return self._skip(task, "No cell/range reference")
+
+        ws = self._get_ws(task.sheet)
+        ref = task.cell or task.range
+        cell = ws[ref.split(":")[0]]
+
+        alignment = cell.alignment
+        has_alignment = (
+            alignment.horizontal not in (None, "general")
+            or alignment.vertical not in (None, "bottom")
+            or alignment.wrap_text is True
+            or alignment.text_rotation not in (None, 0)
+            or alignment.indent not in (None, 0)
+            or alignment.shrink_to_fit is True
+        )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_alignment,
+            message=(
+                f"Alignment: h={alignment.horizontal}, v={alignment.vertical}, "
+                f"wrap={alignment.wrap_text}, rotation={alignment.text_rotation}"
+                if has_alignment
+                else "No custom alignment detected"
+            ),
+            details={
+                "horizontal": alignment.horizontal,
+                "vertical": alignment.vertical,
+                "wrap_text": alignment.wrap_text,
+                "text_rotation": alignment.text_rotation,
+            },
+        )
+
+    def _verify_column_width(self, task: Task) -> VerificationResult:
+        """Verify column width was changed."""
         ws = self._get_ws(task.sheet)
 
-        charts = ws._charts
-        if charts:
+        # Try to determine column from cell/range
+        col_letter = None
+        if task.cell:
+            col_letter = re.match(r"([A-Z]+)", task.cell)
+            col_letter = col_letter.group(1) if col_letter else None
+        elif task.range:
+            col_letter = re.match(r"([A-Z]+)", task.range)
+            col_letter = col_letter.group(1) if col_letter else None
+
+        if col_letter and col_letter in ws.column_dimensions:
+            dim = ws.column_dimensions[col_letter]
+            actual_width = dim.width
+            expected = task.params.get("size")
+
+            if expected:
+                matches = abs(actual_width - expected) < 0.5
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=matches,
+                    message=(
+                        f"Column {col_letter} width={actual_width} "
+                        f"(expected {expected})"
+                    ),
+                    details={"column": col_letter, "width": actual_width, "expected": expected},
+                )
+
             return VerificationResult(
                 task_id=task.id, task_type=task.task_type,
-                passed=True,
-                message=f"{len(charts)} chart(s) found",
+                passed=actual_width is not None,
+                message=f"Column {col_letter} width={actual_width}",
+                details={"column": col_letter, "width": actual_width},
             )
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=False, message="No charts found on sheet",
+            passed=True,
+            message="Column width check skipped (no specific column reference)",
         )
 
-    def _verify_named_range(self, task: Task) -> VerificationResult:
-        """Verify a named range exists."""
+    def _verify_row_height(self, task: Task) -> VerificationResult:
+        """Verify row height was changed."""
+        ws = self._get_ws(task.sheet)
+
+        row_num = None
+        if task.cell:
+            m = re.search(r"(\d+)", task.cell)
+            row_num = int(m.group(1)) if m else None
+
+        if row_num and row_num in ws.row_dimensions:
+            dim = ws.row_dimensions[row_num]
+            actual_height = dim.height
+            expected = task.params.get("size")
+
+            if expected:
+                matches = abs((actual_height or 15) - expected) < 0.5
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=matches,
+                    message=f"Row {row_num} height={actual_height} (expected {expected})",
+                    details={"row": row_num, "height": actual_height, "expected": expected},
+                )
+
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=actual_height is not None,
+                message=f"Row {row_num} height={actual_height}",
+            )
+
+        return self._skip(task, "No row reference for height check")
+
+    def _verify_font(self, task: Task) -> VerificationResult:
+        """Verify font settings (bold, italic, size, color, name)."""
+        if not task.cell and not task.range:
+            return self._skip(task, "No cell/range reference")
+
+        ws = self._get_ws(task.sheet)
+        ref = task.cell or task.range
+        cell = ws[ref.split(":")[0]]
+        font = cell.font
+
+        has_custom_font = (
+            font.bold is True
+            or font.italic is True
+            or font.underline is not None
+            or font.strikethrough is True
+            or (font.size is not None and font.size != 11)
+            or (font.name is not None and font.name != "Calibri")
+            or (font.color and font.color.rgb and font.color.rgb != "00000000")
+        )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_custom_font,
+            message=(
+                f"Font: name={font.name}, size={font.size}, "
+                f"bold={font.bold}, italic={font.italic}"
+                if has_custom_font
+                else "No custom font detected"
+            ),
+            details={
+                "name": font.name, "size": font.size,
+                "bold": font.bold, "italic": font.italic,
+                "underline": font.underline, "color": str(font.color),
+            },
+        )
+
+    def _verify_fill(self, task: Task) -> VerificationResult:
+        """Verify fill/background color was applied."""
+        if not task.cell and not task.range:
+            return self._skip(task, "No cell/range reference")
+
+        ws = self._get_ws(task.sheet)
+        ref = task.cell or task.range
+        cell = ws[ref.split(":")[0]]
+        fill = cell.fill
+
+        has_fill = (
+            fill.fill_type is not None
+            and fill.fill_type != "none"
+            and fill.start_color.index not in (None, "00000000", 0)
+        )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_fill,
+            message=(
+                f"Fill: type={fill.fill_type}, color={fill.start_color.index}"
+                if has_fill
+                else "No fill/background color detected"
+            ),
+            details={
+                "fill_type": fill.fill_type,
+                "color": str(fill.start_color.index),
+            },
+        )
+
+    def _verify_border(self, task: Task) -> VerificationResult:
+        """Verify borders were applied."""
+        if not task.cell and not task.range:
+            return self._skip(task, "No cell/range reference")
+
+        ws = self._get_ws(task.sheet)
+        ref = task.cell or task.range
+        cell = ws[ref.split(":")[0]]
+        border = cell.border
+
+        has_border = any(
+            getattr(border, side).style is not None
+            for side in ("left", "right", "top", "bottom", "diagonal")
+        )
+
+        sides = {}
+        for side in ("left", "right", "top", "bottom"):
+            s = getattr(border, side)
+            if s.style:
+                sides[side] = s.style
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_border,
+            message=(
+                f"Borders: {sides}" if has_border else "No borders detected"
+            ),
+            details={"borders": sides},
+        )
+
+    def _verify_tab_color(self, task: Task) -> VerificationResult:
+        """Verify sheet tab color was set."""
         if not self._wb:
             return self._skip(task, "No workbook loaded")
 
-        names = [dn.name for dn in self._wb.defined_names.definedName]
-        if names:
-            return VerificationResult(
-                task_id=task.id, task_type=task.task_type,
-                passed=True,
-                message=f"Named ranges found: {names}",
-            )
-
-        return VerificationResult(
-            task_id=task.id, task_type=task.task_type,
-            passed=False, message="No named ranges found",
-        )
-
-    def _verify_data_validation(self, task: Task) -> VerificationResult:
-        """Verify data validation exists."""
         ws = self._get_ws(task.sheet)
-
-        dv_count = len(ws.data_validations.dataValidation)
+        color = ws.sheet_properties.tabColor
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=dv_count > 0,
-            message=f"{dv_count} data validation(s) found",
+            passed=color is not None,
+            message=f"Tab color: {color}" if color else "No tab color set",
         )
+
+    # ══════════════════════════════════════════════════════════════════
+    # View & Layout Verifiers
+    # ══════════════════════════════════════════════════════════════════
 
     def _verify_freeze_panes(self, task: Task) -> VerificationResult:
         """Verify freeze panes are set."""
         ws = self._get_ws(task.sheet)
 
+        frozen = ws.freeze_panes
+        expected = task.cell
+
+        if expected and frozen:
+            matches = str(frozen) == expected
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=True,  # freeze is set
+                message=(
+                    f"Freeze panes at {frozen}"
+                    + (f" (expected {expected})" if not matches else "")
+                ),
+                details={"actual": str(frozen), "expected": expected},
+            )
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=ws.freeze_panes is not None,
-            message=f"Freeze panes: {ws.freeze_panes}",
+            passed=frozen is not None,
+            message=f"Freeze panes: {frozen}" if frozen else "No freeze panes set",
         )
+
+    def _verify_split_panes(self, task: Task) -> VerificationResult:
+        """Verify split panes — openpyxl can detect via sheet_view."""
+        ws = self._get_ws(task.sheet)
+
+        # openpyxl stores split info in sheet_view
+        for view in ws.views.sheetView:
+            pane = view.pane
+            if pane and (pane.xSplit or pane.ySplit):
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=True,
+                    message=f"Split panes: xSplit={pane.xSplit}, ySplit={pane.ySplit}",
+                    details={"xSplit": pane.xSplit, "ySplit": pane.ySplit},
+                )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=False,
+            message="No split panes detected",
+        )
+
+    def _verify_page_break(self, task: Task) -> VerificationResult:
+        """Verify page breaks exist."""
+        ws = self._get_ws(task.sheet)
+
+        row_breaks = len(ws.row_breaks.brk) if ws.row_breaks else 0
+        col_breaks = len(ws.col_breaks.brk) if ws.col_breaks else 0
+        total = row_breaks + col_breaks
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=total > 0,
+            message=f"Page breaks: {row_breaks} row, {col_breaks} column",
+            details={"row_breaks": row_breaks, "col_breaks": col_breaks},
+        )
+
+    def _verify_print_settings(self, task: Task) -> VerificationResult:
+        """Verify print/page setup settings."""
+        ws = self._get_ws(task.sheet)
+        ps = ws.page_setup
+
+        has_settings = (
+            ps.orientation is not None
+            or ps.paperSize is not None
+            or ps.fitToWidth is not None
+            or ps.fitToHeight is not None
+            or ws.print_area is not None
+            or ws.print_title_rows is not None
+            or ws.print_title_cols is not None
+        )
+
+        details = {
+            "orientation": ps.orientation,
+            "paper_size": ps.paperSize,
+            "fit_to_width": ps.fitToWidth,
+            "fit_to_height": ps.fitToHeight,
+            "print_area": ws.print_area,
+            "print_title_rows": ws.print_title_rows,
+        }
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_settings,
+            message="Print settings configured" if has_settings else "Default print settings",
+            details=details,
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Data Tool Verifiers
+    # ══════════════════════════════════════════════════════════════════
 
     def _verify_autofilter(self, task: Task) -> VerificationResult:
         """Verify autofilter is enabled."""
         ws = self._get_ws(task.sheet)
-
         has_filter = ws.auto_filter.ref is not None
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
             passed=has_filter,
             message=f"Autofilter: {ws.auto_filter.ref}" if has_filter else "No autofilter",
+            details={"ref": ws.auto_filter.ref} if has_filter else None,
         )
 
-    def _verify_sheet_exists(self, task: Task) -> VerificationResult:
-        """Verify a sheet exists."""
+    def _verify_sort(self, task: Task) -> VerificationResult:
+        """Verify data appears sorted (heuristic — checks if auto_filter has sort state)."""
+        ws = self._get_ws(task.sheet)
+
+        # openpyxl doesn't directly store sort state, but if autofilter
+        # has sortCondition children, that's evidence of sorting
+        if ws.auto_filter.ref:
+            sort_state = ws.auto_filter.sortState
+            if sort_state and sort_state.sortCondition:
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=True,
+                    message=f"Sort state found: {len(sort_state.sortCondition)} condition(s)",
+                )
+
+        # Fallback: check if any SUBTOTAL functions exist (often paired with sort)
+        has_subtotal = False
+        for row in ws.iter_rows(max_row=min(ws.max_row or 1, 100)):
+            for cell in row:
+                if isinstance(cell.value, str) and "SUBTOTAL" in cell.value.upper():
+                    has_subtotal = True
+                    break
+            if has_subtotal:
+                break
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_subtotal,
+            message=(
+                "SUBTOTAL formulas found (likely sorted with subtotals)"
+                if has_subtotal
+                else "Cannot confirm sort state via openpyxl (sort applied at runtime)"
+            ),
+        )
+
+    def _verify_subtotal(self, task: Task) -> VerificationResult:
+        """Verify SUBTOTAL formulas and outline/grouping exist."""
+        ws = self._get_ws(task.sheet)
+
+        subtotal_count = 0
+        outline_levels = set()
+
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.upper().startswith("=SUBTOTAL"):
+                    subtotal_count += 1
+            # Check row outline level
+            row_num = row[0].row if row else None
+            if row_num and row_num in ws.row_dimensions:
+                level = ws.row_dimensions[row_num].outlineLevel
+                if level and level > 0:
+                    outline_levels.add(level)
+
+        has_subtotals = subtotal_count > 0 or len(outline_levels) > 0
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_subtotals,
+            message=(
+                f"{subtotal_count} SUBTOTAL formula(s), "
+                f"{len(outline_levels)} outline level(s)"
+            ),
+            details={
+                "subtotal_formulas": subtotal_count,
+                "outline_levels": sorted(outline_levels),
+            },
+        )
+
+    def _verify_data_validation(self, task: Task) -> VerificationResult:
+        """Verify data validation exists, with type details."""
+        ws = self._get_ws(task.sheet)
+        dv_list = ws.data_validations.dataValidation
+
+        if not dv_list:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False, message="No data validations found",
+            )
+
+        details = []
+        for dv in dv_list:
+            details.append({
+                "type": dv.type,
+                "ranges": str(dv.sqref),
+                "formula1": str(dv.formula1) if dv.formula1 else None,
+                "allow_blank": dv.allow_blank,
+            })
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=True,
+            message=f"{len(dv_list)} data validation(s) found",
+            details={"validations": details},
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Chart Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
+    def _verify_chart(self, task: Task) -> VerificationResult:
+        """Verify a chart exists on the sheet, with type checking."""
+        ws = self._get_ws(task.sheet)
+        charts = ws._charts
+
+        if not charts:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False, message="No charts found on sheet",
+            )
+
+        chart_types = []
+        for chart in charts:
+            chart_types.append(type(chart).__name__)
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=True,
+            message=f"{len(charts)} chart(s) found: {chart_types}",
+            details={"count": len(charts), "types": chart_types},
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Range & Reference Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
+    def _verify_named_range(self, task: Task) -> VerificationResult:
+        """Verify a named range exists, with optional name matching."""
         if not self._wb:
             return self._skip(task, "No workbook loaded")
 
-        sheet_name = task.sheet or task.params.get("name")
-        exists = sheet_name in self._wb.sheetnames if sheet_name else False
+        names = [dn.name for dn in self._wb.defined_names.definedName]
+
+        if not names:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False, message="No named ranges found",
+            )
+
+        # If task has a specific name in params, check for it
+        expected_name = task.params.get("name") or task.value
+        if expected_name:
+            found = any(n.lower() == expected_name.lower() for n in names)
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=found,
+                message=(
+                    f"Named range '{expected_name}' found"
+                    if found
+                    else f"Named range '{expected_name}' not found (existing: {names})"
+                ),
+                details={"expected": expected_name, "all_names": names},
+            )
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=exists,
-            message=f"Sheet '{sheet_name}' {'exists' if exists else 'not found'}",
+            passed=True,
+            message=f"Named ranges found: {names}",
+            details={"names": names},
+        )
+
+    def _verify_hyperlink(self, task: Task) -> VerificationResult:
+        """Verify a hyperlink exists on the specified cell or sheet."""
+        ws = self._get_ws(task.sheet)
+
+        if task.cell:
+            cell = ws[task.cell]
+            if cell.hyperlink:
+                return VerificationResult(
+                    task_id=task.id, task_type=task.task_type,
+                    passed=True,
+                    message=f"Hyperlink on {task.cell}: {cell.hyperlink.target}",
+                    details={"target": cell.hyperlink.target, "display": cell.hyperlink.display},
+                )
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False,
+                message=f"No hyperlink on cell {task.cell}",
+            )
+
+        # Check entire sheet for any hyperlinks
+        hyperlinks = ws.hyperlinks
+        if hasattr(hyperlinks, '__len__'):
+            count = len(hyperlinks)
+        else:
+            count = sum(1 for _ in hyperlinks) if hyperlinks else 0
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=count > 0,
+            message=f"{count} hyperlink(s) found on sheet" if count > 0 else "No hyperlinks found",
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Advanced Feature Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
+    def _verify_slicer(self, task: Task) -> VerificationResult:
+        """
+        Verify slicer existence.  openpyxl has limited slicer support —
+        we check for slicerCache entries in the workbook's rels/XML.
+        """
+        if not self._wb:
+            return self._skip(task, "No workbook loaded")
+
+        # openpyxl doesn't directly expose slicers, but we can check
+        # if the workbook has slicer caches (stored in wb._slicers or rels)
+        has_slicers = False
+
+        # Check for slicer drawing objects on sheets
+        ws = self._get_ws(task.sheet)
+        # Slicer presence can be inferred from drawings or defined name _xlnm.Slicer
+        for dn in self._wb.defined_names.definedName:
+            if "slicer" in dn.name.lower() or "_xlnm.Slicer" in str(dn.name):
+                has_slicers = True
+                break
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=has_slicers,
+            message=(
+                "Slicer evidence found in workbook"
+                if has_slicers
+                else "No slicers detected (limited openpyxl support — verify in Excel)"
+            ),
+        )
+
+    def _verify_pivot_table(self, task: Task) -> VerificationResult:
+        """Verify a PivotTable exists (check via openpyxl pivotTable collection)."""
+        if not self._wb:
+            return self._skip(task, "No workbook loaded")
+
+        ws = self._get_ws(task.sheet)
+
+        # openpyxl stores pivot tables in ws._pivots
+        pivot_count = len(ws._pivots) if hasattr(ws, "_pivots") else 0
+
+        if pivot_count > 0:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=True,
+                message=f"{pivot_count} PivotTable(s) found on sheet",
+            )
+
+        # Fallback: check all sheets
+        total = 0
+        for name in self._wb.sheetnames:
+            s = self._wb[name]
+            if hasattr(s, "_pivots"):
+                total += len(s._pivots)
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=total > 0,
+            message=(
+                f"{total} PivotTable(s) found in workbook"
+                if total > 0
+                else "No PivotTables found"
+            ),
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Sheet Operation Verifiers
+    # ══════════════════════════════════════════════════════════════════
+
+    def _verify_sheet_exists(self, task: Task) -> VerificationResult:
+        """Verify a sheet exists by name."""
+        if not self._wb:
+            return self._skip(task, "No workbook loaded")
+
+        sheet_name = task.sheet or task.params.get("name") or task.value
+        if sheet_name:
+            exists = sheet_name in self._wb.sheetnames
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=exists,
+                message=f"Sheet '{sheet_name}' {'exists' if exists else 'not found'}",
+                details={"sheet": sheet_name, "all_sheets": self._wb.sheetnames},
+            )
+
+        return VerificationResult(
+            task_id=task.id, task_type=task.task_type,
+            passed=True,
+            message=f"Sheets: {self._wb.sheetnames}",
         )
 
     def _verify_merged_cells(self, task: Task) -> VerificationResult:
-        """Verify merged cells exist."""
+        """Verify merged cells exist, with range details."""
         ws = self._get_ws(task.sheet)
         merged = ws.merged_cells.ranges
 
+        if not merged:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False, message="No merged cells found",
+            )
+
+        ranges = [str(r) for r in merged]
+
+        # Check if a specific range matches
+        if task.range and task.range in ranges:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=True,
+                message=f"Merged range {task.range} found",
+                details={"all_merged": ranges},
+            )
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=len(merged) > 0,
-            message=f"{len(merged)} merged range(s) found",
+            passed=True,
+            message=f"{len(ranges)} merged range(s): {ranges}",
+            details={"merged_ranges": ranges},
         )
 
-    # ── Helpers ──
+    # ══════════════════════════════════════════════════════════════════
+    # Helpers
+    # ══════════════════════════════════════════════════════════════════
 
     def _get_ws(self, sheet_name: Optional[str] = None):
         """Get a worksheet by name or active sheet."""

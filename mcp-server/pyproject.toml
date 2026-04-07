@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "excel-engine-mcp-server"
+version = "1.0.0"
+description = "MCP server for the Excel Engine — autonomous Excel automation on macOS"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "mcp>=1.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools]
+py-modules = ["server"]
+
+# Reference the local excel_engine package via editable install:
+#   pip install -e ../   (from inside mcp-server/)
+# Or add to pip install:
+#   pip install -e /path/to/excel-engine

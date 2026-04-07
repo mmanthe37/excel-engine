@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "excel-engine": {
+      "command": "/Users/michaelmanthejr/Dev/excel-engine/.venv/bin/python",
+      "args": ["/Users/michaelmanthejr/Dev/excel-engine/mcp-server/server.py"],
+      "env": {}
+    }
+  }
+}

@@ -30,7 +30,7 @@
 
 ```bash
 # Install from PyPI
-pip install excel-engine
+pip3 install excel-engine
 
 # Run against an assignment
 excel-engine run --instructions assignment.rtfd --workbook workbook.xlsx
@@ -78,21 +78,21 @@ Excel Engine uses a 6-layer cascading architecture. Each layer is attempted in o
 ### Python Package
 
 ```bash
-pip install excel-engine
+pip3 install excel-engine
 ```
 
 ### CLI Application
 
 ```bash
 # Installed automatically with the Python package
-pip install excel-engine
+pip3 install excel-engine
 excel-engine --help
 ```
 
 ### MCP Server
 
 ```bash
-pip install excel-engine[mcp]
+pip3 install excel-engine[mcp]
 
 # Add to your MCP configuration
 excel-engine mcp install
@@ -253,3 +253,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR gu
 ## License
 
 [MIT](LICENSE) © 2026 Michael Manthe
+
+openpyxl, xlwings, AppleScript, System Events, VBA via VBE, PyAutoGUI

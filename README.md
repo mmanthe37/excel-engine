@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/excel-engine.svg)](https://pypi.org/project/excel-engine/)
+[![PyPI](https://img.shields.io/badge/PyPI-coming%20soon-orange)](https://github.com/mmanthe37/excel-engine)
 
 **A 6-layer desktop automation engine that completes Microsoft Excel assignments autonomously on macOS.**
 
@@ -30,8 +30,11 @@
 ## Quick Start
 
 ```bash
-# Install from PyPI
-pip3 install excel-engine
+# Install from source (recommended)
+git clone https://github.com/mmanthe37/excel-engine.git
+cd excel-engine
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 
 # Run against an assignment
 excel-engine run assignment.xlsx instructions.docx
@@ -76,24 +79,36 @@ Excel Engine uses a 6-layer cascading architecture. Each layer is attempted in o
 
 ## Installation
 
-### Python Package
+> **Note:** This package is not yet published to PyPI. Install from source or directly from GitHub.
+
+### Python Package (from source)
 
 ```bash
-pip3 install excel-engine
+git clone https://github.com/mmanthe37/excel-engine.git
+cd excel-engine
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+### Python Package (from GitHub, no clone needed)
+
+```bash
+python3 -m venv ~/excel-env && source ~/excel-env/bin/activate
+pip install git+https://github.com/mmanthe37/excel-engine.git
 ```
 
 ### CLI Application
 
 ```bash
 # Installed automatically with the Python package
-pip3 install excel-engine
+source .venv/bin/activate  # or whichever venv you used
 excel-engine --help
 ```
 
 ### MCP Server
 
 ```bash
-pip3 install excel-engine
+source .venv/bin/activate
 
 # Run the MCP server via stdio transport
 python mcp-server/server.py
@@ -233,12 +248,12 @@ The Copilot plugin integrates directly into GitHub Copilot Chat, allowing natura
 | Package | Purpose | Required |
 |---------|---------|----------|
 | `openpyxl` | Offline .xlsx file manipulation | ✅ Yes |
-| `xlwings` | Live Excel application bridge | Optional (`pip3 install excel-engine[live]`) |
-| `pyautogui` | Desktop GUI automation | Optional (`pip3 install excel-engine[ui]`) |
-| `python-docx` | Reading .docx/.rtfd instructions | Optional (`pip3 install excel-engine[parsers]`) |
-| `pdfplumber` | Reading .pdf instructions | Optional (`pip3 install excel-engine[parsers]`) |
+| `xlwings` | Live Excel application bridge | Optional (`pip install "excel-engine[live]"`) |
+| `pyautogui` | Desktop GUI automation | Optional (`pip install "excel-engine[ui]"`) |
+| `python-docx` | Reading .docx/.rtfd instructions | Optional (`pip install "excel-engine[parsers]"`) |
+| `pdfplumber` | Reading .pdf instructions | Optional (`pip install "excel-engine[parsers]"`) |
 
-Install everything: `pip3 install excel-engine[all]`
+Install everything: `pip install "excel-engine[all]"` (from inside your venv)
 
 ### macOS Permissions
 

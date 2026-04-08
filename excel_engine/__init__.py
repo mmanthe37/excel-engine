@@ -13,7 +13,16 @@ A 6-layer architecture for completing Microsoft Excel worksheet assignments:
 __version__ = "1.0.0"
 __author__ = "Excel Engine Contributors"
 
-from excel_engine.engine import ExcelEngine
-from excel_engine.config import EngineConfig
+from excel_engine.engine import ExcelEngine, EngineResult
+from excel_engine.config import EngineConfig, TaskType, Layer
+from excel_engine.parsers.task_extractor import Task
+from excel_engine.planner.task_planner import ExecutionPlan, Section
+from excel_engine.verifier.workbook_verifier import WorkbookVerifier, SectionVerification, VerificationResult
 
-__all__ = ["ExcelEngine", "EngineConfig", "__version__"]
+__all__ = [
+    "ExcelEngine", "EngineResult", "EngineConfig",
+    "TaskType", "Layer", "Task",
+    "ExecutionPlan", "Section",
+    "WorkbookVerifier", "SectionVerification", "VerificationResult",
+    "__version__",
+]

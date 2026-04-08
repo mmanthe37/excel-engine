@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Optional
 
@@ -56,8 +55,12 @@ mcp = FastMCP(
 # ─────────────────────────────────────────────────────────────────────
 
 def _resolve_path(p: str) -> Path:
-    """Expand ~ and resolve to absolute path."""
-    return Path(p).expanduser().resolve()
+    """Expand ~ and resolve to absolute path, with boundary validation."""
+    resolved = Path(p).expanduser().resolve()
+    _ALLOWED_DIRS = [Path.home()]
+    if not any(resolved.is_relative_to(d) for d in _ALLOWED_DIRS):
+        raise ValueError(f"Path must be under home directory: {resolved}")
+    return resolved
 
 
 def _engine_result_to_dict(result) -> dict[str, Any]:
@@ -143,9 +146,10 @@ def complete_assignment(
             return json.dumps({"error": f"Instruction file not found: {inst}"})
 
         config = EngineConfig()
+        _SAFE_OPTIONS = {"max_retries", "verify_after_each_section", "retina_display", "scan_timeout"}
         if options:
             for key, val in options.items():
-                if hasattr(config, key):
+                if key in _SAFE_OPTIONS and hasattr(config, key):
                     setattr(config, key, val)
 
         logger.info("Starting assignment: %s with %s", wb.name, inst.name)
@@ -156,10 +160,7 @@ def complete_assignment(
 
     except Exception as exc:
         logger.exception("complete_assignment failed")
-        return json.dumps({
-            "error": str(exc),
-            "traceback": traceback.format_exc(),
-        })
+        return json.dumps({"error": f"Internal error: {type(exc).__name__}"})
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -201,7 +202,7 @@ def parse_instructions(instruction_path: str) -> str:
 
     except Exception as exc:
         logger.exception("parse_instructions failed")
-        return json.dumps({"error": str(exc), "traceback": traceback.format_exc()})
+        return json.dumps({"error": f"Internal error: {type(exc).__name__}"})
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -228,6 +229,11 @@ def execute_openpyxl(workbook_path: str, tasks: list[str]) -> str:
         if not wb.exists():
             return json.dumps({"error": f"Workbook not found: {wb}"})
 
+        if len(tasks) > 500:
+            return json.dumps({"error": "Too many tasks (max 500)"})
+        if any(len(t) > 10000 for t in tasks):
+            return json.dumps({"error": "Task too long (max 10000 chars)"})
+
         extractor = TaskExtractor()
         task_text = "\n".join(f"- {t}" for t in tasks)
         task_objs = extractor.extract(task_text)
@@ -243,7 +249,7 @@ def execute_openpyxl(workbook_path: str, tasks: list[str]) -> str:
 
     except Exception as exc:
         logger.exception("execute_openpyxl failed")
-        return json.dumps({"error": str(exc), "traceback": traceback.format_exc()})
+        return json.dumps({"error": f"Internal error: {type(exc).__name__}"})
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -270,6 +276,11 @@ def execute_live(workbook_path: str, tasks: list[str]) -> str:
         if not wb.exists():
             return json.dumps({"error": f"Workbook not found: {wb}"})
 
+        if len(tasks) > 500:
+            return json.dumps({"error": "Too many tasks (max 500)"})
+        if any(len(t) > 10000 for t in tasks):
+            return json.dumps({"error": "Task too long (max 10000 chars)"})
+
         extractor = TaskExtractor()
         task_text = "\n".join(f"- {t}" for t in tasks)
         task_objs = extractor.extract(task_text)
@@ -291,7 +302,7 @@ def execute_live(workbook_path: str, tasks: list[str]) -> str:
 
     except Exception as exc:
         logger.exception("execute_live failed")
-        return json.dumps({"error": str(exc), "traceback": traceback.format_exc()})
+        return json.dumps({"error": f"Internal error: {type(exc).__name__}"})
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -381,7 +392,7 @@ def verify_workbook(
 
     except Exception as exc:
         logger.exception("verify_workbook failed")
-        return json.dumps({"error": str(exc), "traceback": traceback.format_exc()})
+        return json.dumps({"error": f"Internal error: {type(exc).__name__}"})
 
 
 # ─────────────────────────────────────────────────────────────────────

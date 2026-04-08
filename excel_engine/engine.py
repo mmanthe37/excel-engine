@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -98,34 +99,116 @@ class ExcelEngine:
         self.config = config or EngineConfig()
 
         # Initialize layers
-        self.openpyxl = OpenpyxlLayer()
-        self.xlwings = XlwingsLayer()
-        self.applescript = AppleScriptLayer(timeout=self.config.applescript_timeout)
-        self.system_events = SystemEventsLayer(delay=self.config.ui_delay_between_actions)
-        self.vba = VBALayer(
+        self._openpyxl = OpenpyxlLayer()
+        self._xlwings = XlwingsLayer()
+        self._applescript = AppleScriptLayer(timeout=self.config.applescript_timeout)
+        self._system_events = SystemEventsLayer(delay=self.config.ui_delay_between_actions)
+        self._vba = VBALayer(
             execution_timeout=self.config.vba_execution_timeout,
             split_threshold=self.config.vba_split_threshold,
         )
-        self.pyautogui = PyAutoGUILayer(retina=self.config.retina_display)
+        self._pyautogui = PyAutoGUILayer(retina=self.config.retina_display)
 
         # Initialize components
-        self.parser = InstructionParser()
-        self.extractor = TaskExtractor()
-        self.planner = TaskPlanner(config=self.config)
-        self.verifier = WorkbookVerifier()
+        self._parser = InstructionParser()
+        self._extractor = TaskExtractor()
+        self._planner = TaskPlanner(config=self.config)
+        self._verifier = WorkbookVerifier()
         self.path_handler = PathHandler(desktop_path=self.config.desktop_path)
 
         # Layer lookup
         self._layers = {
-            Layer.OPENPYXL: self.openpyxl,
-            Layer.XLWINGS: self.xlwings,
-            Layer.APPLESCRIPT: self.applescript,
-            Layer.SYSTEM_EVENTS: self.system_events,
-            Layer.VBA: self.vba,
-            Layer.PYAUTOGUI: self.pyautogui,
+            Layer.OPENPYXL: self._openpyxl,
+            Layer.XLWINGS: self._xlwings,
+            Layer.APPLESCRIPT: self._applescript,
+            Layer.SYSTEM_EVENTS: self._system_events,
+            Layer.VBA: self._vba,
+            Layer.PYAUTOGUI: self._pyautogui,
         }
 
+    # ── Public read-only properties ──
+
+    @property
+    def openpyxl(self) -> OpenpyxlLayer:
+        return self._openpyxl
+
+    @property
+    def xlwings(self) -> XlwingsLayer:
+        return self._xlwings
+
+    @property
+    def applescript(self) -> AppleScriptLayer:
+        return self._applescript
+
+    @property
+    def system_events(self) -> SystemEventsLayer:
+        return self._system_events
+
+    @property
+    def vba(self) -> VBALayer:
+        return self._vba
+
+    @property
+    def pyautogui(self) -> PyAutoGUILayer:
+        return self._pyautogui
+
+    @property
+    def parser(self) -> InstructionParser:
+        return self._parser
+
+    @property
+    def extractor(self) -> TaskExtractor:
+        return self._extractor
+
+    @property
+    def planner(self) -> TaskPlanner:
+        return self._planner
+
+    @property
+    def verifier(self) -> WorkbookVerifier:
+        return self._verifier
+
     # ── Main Entry Point ──
+
+    def execute(self, plan: ExecutionPlan, workbook: Path) -> EngineResult:
+        """Execute a pre-built plan against a workbook."""
+        start_time = time.time()
+        workbook = Path(workbook).resolve()
+
+        result = EngineResult(
+            success=False,
+            workbook_path=workbook,
+            sections_completed=0,
+            sections_total=plan.section_count,
+            tasks_completed=0,
+            tasks_total=plan.total_tasks,
+        )
+
+        try:
+            logger.info("=" * 60)
+            logger.info("EXECUTE — Running %d sections", plan.section_count)
+            logger.info("=" * 60)
+
+            for section in plan.sections:
+                section_ok = self._execute_section(section, workbook, result)
+                if section_ok:
+                    result.sections_completed += 1
+
+            result.success = (
+                result.sections_completed == result.sections_total
+                and result.tasks_completed == result.tasks_total
+            )
+
+        except Exception as e:
+            logger.exception("Execution failed: %s", e)
+            result.errors.append(str(e))
+
+        finally:
+            result.elapsed_seconds = time.time() - start_time
+            self._cleanup()
+
+        logger.info("\n%s", result.summary())
+        return result
 
     def run(
         self,
@@ -142,17 +225,10 @@ class ExcelEngine:
           - instruction_text: raw instruction text
           - tasks: pre-extracted Task list
         """
-        start_time = time.time()
         workbook = Path(workbook).resolve()
 
-        result = EngineResult(
-            success=False,
-            workbook_path=workbook,
-            sections_completed=0,
-            sections_total=0,
-            tasks_completed=0,
-            tasks_total=0,
-        )
+        if tasks:
+            tasks = deepcopy(tasks)
 
         try:
             # ── Phase 1: SCAN ──
@@ -162,13 +238,13 @@ class ExcelEngine:
 
             if tasks is None:
                 if instructions:
-                    text = self.parser.parse(instructions)
+                    text = self._parser.parse(instructions)
                 elif instruction_text:
                     text = instruction_text
                 else:
                     raise ValueError("Provide instructions, instruction_text, or tasks")
 
-                tasks = self.extractor.extract(text)
+                tasks = self._extractor.extract(text)
 
             logger.info("Extracted %d tasks", len(tasks))
 
@@ -177,37 +253,24 @@ class ExcelEngine:
             logger.info("PHASE 2: GROUP — Planning execution")
             logger.info("=" * 60)
 
-            plan = self.planner.plan(tasks)
-            result.sections_total = plan.section_count
-            result.tasks_total = plan.total_tasks
-
+            plan = self._planner.plan(tasks)
             logger.info("\n%s", plan.summary())
 
             # ── Phase 3: EXECUTE ──
-            logger.info("=" * 60)
-            logger.info("PHASE 3: EXECUTE — Running %d sections", plan.section_count)
-            logger.info("=" * 60)
-
-            for section in plan.sections:
-                section_ok = self._execute_section(section, workbook, result)
-                if section_ok:
-                    result.sections_completed += 1
-
-            result.success = (
-                result.sections_completed == result.sections_total
-                and result.tasks_completed == result.tasks_total
-            )
+            return self.execute(plan, workbook)
 
         except Exception as e:
-            logger.exception("Engine failed: %s", e)
-            result.errors.append(str(e))
-
-        finally:
-            result.elapsed_seconds = time.time() - start_time
-            self._cleanup()
-
-        logger.info("\n%s", result.summary())
-        return result
+            logger.exception("Engine failed during scan/plan: %s", e)
+            result = EngineResult(
+                success=False,
+                workbook_path=workbook,
+                sections_completed=0,
+                sections_total=0,
+                tasks_completed=0,
+                tasks_total=0,
+                errors=[str(e)],
+            )
+            return result
 
     # ── Section Execution ──
 
@@ -238,10 +301,10 @@ class ExcelEngine:
         if self.config.verify_after_each_section:
             try:
                 self._save_workbook(workbook)
-                self.verifier.load(workbook)
-                verification = self.verifier.verify_section(section.id, section.tasks)
+                self._verifier.load(workbook)
+                verification = self._verifier.verify_section(section.id, section.tasks)
                 result.verifications.append(verification)
-                self.verifier.close()
+                self._verifier.close()
 
                 if not verification.all_passed:
                     logger.warning(
@@ -337,35 +400,35 @@ class ExcelEngine:
 
     def _exec_openpyxl(self, task: Task, workbook: Path) -> None:
         """Execute a task via Layer 1 (openpyxl)."""
-        if not self.openpyxl.wb:
-            self.openpyxl.open(workbook)
+        if not self._openpyxl.wb:
+            self._openpyxl.open(workbook)
 
         tt = task.task_type
 
         if tt == TaskType.FORMULA:
             if task.cell and task.formula:
-                self.openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
+                self._openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
 
         elif tt == TaskType.CELL_VALUE:
             if task.cell and task.value:
-                self.openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
+                self._openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
 
         elif tt == TaskType.TABLE_CREATE:
             name = task.params.get("name", "Table1")
             ref = task.range or task.params.get("ref", "A1:A1")
             style = task.style or task.params.get("style", "TableStyleMedium5")
-            self.openpyxl.create_table(name, ref, style=style, sheet=task.sheet)
+            self._openpyxl.create_table(name, ref, style=style, sheet=task.sheet)
 
         elif tt == TaskType.NUMBER_FORMAT:
             ref = task.range or task.cell
             fmt = task.params.get("format", "$#,##0.00")
             if ref:
-                self.openpyxl.set_number_format(ref, fmt, sheet=task.sheet)
+                self._openpyxl.set_number_format(ref, fmt, sheet=task.sheet)
 
         elif tt == TaskType.FONT:
             ref = task.range or task.cell
             if ref:
-                self.openpyxl.set_font(
+                self._openpyxl.set_font(
                     ref, sheet=task.sheet,
                     bold=task.params.get("bold", False),
                     italic=task.params.get("italic", False),
@@ -378,12 +441,12 @@ class ExcelEngine:
             ref = task.range or task.cell
             color = task.params.get("color", "FFFF00")
             if ref:
-                self.openpyxl.set_fill(ref, color, sheet=task.sheet)
+                self._openpyxl.set_fill(ref, color, sheet=task.sheet)
 
         elif tt == TaskType.ALIGNMENT:
             ref = task.range or task.cell
             if ref:
-                self.openpyxl.set_alignment(
+                self._openpyxl.set_alignment(
                     ref, sheet=task.sheet,
                     horizontal=task.params.get("horizontal", "general"),
                     vertical=task.params.get("vertical", "bottom"),
@@ -393,7 +456,7 @@ class ExcelEngine:
         elif tt == TaskType.BORDER:
             ref = task.range or task.cell
             if ref:
-                self.openpyxl.set_border(
+                self._openpyxl.set_border(
                     ref, sheet=task.sheet,
                     style=task.params.get("style", "thin"),
                 )
@@ -401,18 +464,18 @@ class ExcelEngine:
         elif tt == TaskType.COLUMN_WIDTH:
             col = task.params.get("column", "A")
             width = task.params.get("width", 12)
-            self.openpyxl.set_column_width(col, width, sheet=task.sheet)
+            self._openpyxl.set_column_width(col, width, sheet=task.sheet)
 
         elif tt == TaskType.CONDITIONAL_FORMAT:
             ref = task.range or "A1:A1"
             operator = task.params.get("operator", "greaterThan")
             formula = task.params.get("formula", ["0"])
-            self.openpyxl.add_conditional_format_cell_is(
+            self._openpyxl.add_conditional_format_cell_is(
                 ref, operator, formula, sheet=task.sheet,
             )
 
         elif tt == TaskType.CHART_BAR:
-            self.openpyxl.add_bar_chart(
+            self._openpyxl.add_bar_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 data_range=task.params.get("data_range", task.range or "B1:B10"),
@@ -421,7 +484,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.CHART_LINE:
-            self.openpyxl.add_line_chart(
+            self._openpyxl.add_line_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 data_range=task.params.get("data_range", task.range or "B1:B10"),
@@ -430,7 +493,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.CHART_PIE:
-            self.openpyxl.add_pie_chart(
+            self._openpyxl.add_pie_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 data_range=task.params.get("data_range", task.range or "B1:B10"),
@@ -439,7 +502,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.CHART_SCATTER:
-            self.openpyxl.add_scatter_chart(
+            self._openpyxl.add_scatter_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 x_range=task.params.get("x_range", task.range or "A1:A10"),
@@ -449,7 +512,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.CHART_AREA:
-            self.openpyxl.add_area_chart(
+            self._openpyxl.add_area_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 data_range=task.params.get("data_range", task.range or "B1:B10"),
@@ -459,7 +522,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.CHART_COMBO:
-            self.openpyxl.add_combo_chart(
+            self._openpyxl.add_combo_chart(
                 sheet=task.sheet,
                 title=task.params.get("title", ""),
                 bar_data_range=task.params.get("bar_data_range", task.range or "B1:B10"),
@@ -471,13 +534,13 @@ class ExcelEngine:
 
         elif tt == TaskType.NAMED_RANGE:
             name = task.params.get("name", "NamedRange1")
-            sheet = task.sheet or self.openpyxl.wb.active.title
+            sheet = task.sheet or self._openpyxl.wb.active.title
             range_str = task.range or "$A$1"
-            self.openpyxl.create_named_range(name, sheet, range_str)
+            self._openpyxl.create_named_range(name, sheet, range_str)
 
         elif tt == TaskType.DATA_VALIDATION:
             ref = task.range or task.cell or "A1"
-            self.openpyxl.add_data_validation(
+            self._openpyxl.add_data_validation(
                 ref, sheet=task.sheet,
                 validation_type=task.params.get("type", "list"),
                 formula1=task.params.get("formula1"),
@@ -485,31 +548,31 @@ class ExcelEngine:
 
         elif tt == TaskType.FREEZE_PANES:
             cell = task.cell or "A2"
-            self.openpyxl.freeze_panes(cell, sheet=task.sheet)
+            self._openpyxl.freeze_panes(cell, sheet=task.sheet)
 
         elif tt == TaskType.AUTOFILTER:
             ref = task.range or task.params.get("ref", "A1:A1")
-            self.openpyxl.set_autofilter(ref, sheet=task.sheet)
+            self._openpyxl.set_autofilter(ref, sheet=task.sheet)
 
         elif tt == TaskType.SHEET_CREATE:
             name = task.params.get("name", task.sheet or "NewSheet")
-            self.openpyxl.create_sheet(name)
+            self._openpyxl.create_sheet(name)
 
         elif tt == TaskType.SHEET_RENAME:
             old = task.params.get("old_name", "Sheet1")
             new = task.params.get("new_name", task.sheet or "Renamed")
-            self.openpyxl.rename_sheet(old, new)
+            self._openpyxl.rename_sheet(old, new)
 
         elif tt == TaskType.MERGE_CELLS:
             ref = task.range
             if ref:
-                self.openpyxl.merge_cells(ref, sheet=task.sheet)
+                self._openpyxl.merge_cells(ref, sheet=task.sheet)
 
         elif tt == TaskType.PRINT_SETTINGS:
             if task.params.get("landscape"):
-                self.openpyxl.set_page_orientation(True, sheet=task.sheet)
+                self._openpyxl.set_page_orientation(True, sheet=task.sheet)
             if task.params.get("print_area"):
-                self.openpyxl.set_print_area(task.params["print_area"], sheet=task.sheet)
+                self._openpyxl.set_print_area(task.params["print_area"], sheet=task.sheet)
 
         # Formula-based types — delegate to existing set_formula
         elif tt in (TaskType.TEXT_FUNCTION, TaskType.LOOKUP_FUNCTION,
@@ -517,14 +580,14 @@ class ExcelEngine:
                     TaskType.UNIQUE_FUNCTION, TaskType.THREE_D_REFERENCE,
                     TaskType.EXTERNAL_REFERENCE):
             if task.cell and task.formula:
-                self.openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
+                self._openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
             elif task.cell and task.value:
-                self.openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
+                self._openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
 
         # Table total row
         elif tt == TaskType.TABLE_TOTAL_ROW:
             # openpyxl tables support totalsRowShown
-            ws = self.openpyxl._ws(task.sheet)
+            ws = self._openpyxl._ws(task.sheet)
             for table in ws.tables.values():
                 if not task.params.get("name") or table.name == task.params.get("name"):
                     table.totalsRowShown = True
@@ -532,27 +595,27 @@ class ExcelEngine:
 
         # Row height
         elif tt == TaskType.ROW_HEIGHT:
-            ws = self.openpyxl._ws(task.sheet)
+            ws = self._openpyxl._ws(task.sheet)
             row_num = int(task.cell[1:]) if task.cell else task.params.get("row", 1)
             height = task.params.get("size", task.params.get("height", 15))
             ws.row_dimensions[row_num].height = height
 
         # Tab color
         elif tt == TaskType.TAB_COLOR:
-            ws = self.openpyxl._ws(task.sheet)
+            ws = self._openpyxl._ws(task.sheet)
             color = task.params.get("color", "FF0000")
             ws.sheet_properties.tabColor = color
 
         # Page break
         elif tt == TaskType.PAGE_BREAK:
             from openpyxl.worksheet.pagebreak import Break
-            ws = self.openpyxl._ws(task.sheet)
+            ws = self._openpyxl._ws(task.sheet)
             row_num = int(task.cell[1:]) if task.cell else task.params.get("row", 1)
             ws.row_breaks.append(Break(id=row_num))
 
         # Hyperlink
         elif tt == TaskType.HYPERLINK:
-            ws = self.openpyxl._ws(task.sheet)
+            ws = self._openpyxl._ws(task.sheet)
             cell = ws[task.cell]
             url = task.params.get("url", task.value or "")
             display = task.params.get("display", url)
@@ -564,20 +627,20 @@ class ExcelEngine:
         elif tt == TaskType.SHEET_MOVE:
             if task.sheet:
                 idx = task.params.get("position", 0)
-                self.openpyxl.wb.move_sheet(task.sheet, offset=idx)
+                self._openpyxl.wb.move_sheet(task.sheet, offset=idx)
 
         # Sheet copy
         elif tt == TaskType.SHEET_COPY:
             source = task.sheet or task.params.get("source")
             new_name = task.params.get("new_name", f"{source} Copy")
-            ws = self.openpyxl.wb.copy_worksheet(self.openpyxl.wb[source])
+            ws = self._openpyxl.wb.copy_worksheet(self._openpyxl.wb[source])
             ws.title = new_name
 
         # Generic FORMATTING — apply whatever params specify
         elif tt == TaskType.FORMATTING:
             if task.cell or task.range:
                 target = task.cell or task.range
-                ws = self.openpyxl._ws(task.sheet)
+                ws = self._openpyxl._ws(task.sheet)
                 # Delegate to font/fill/border/alignment based on params
                 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
                 cells = ws[target] if ':' in str(target) else [[ws[target]]]
@@ -599,25 +662,25 @@ class ExcelEngine:
         """Execute a task via Layer 2 (xlwings)."""
         safe_path = self.path_handler.safe_copy_for_xlwings(workbook)
 
-        if not self.xlwings._wb:
+        if not self._xlwings._wb:
             MacUtils.launch_excel()
             MacUtils.open_workbook_in_excel(safe_path)
             MacUtils.wait_for_excel_ready()
-            self.xlwings.connect(safe_path)
+            self._xlwings.connect(safe_path)
 
         tt = task.task_type
 
         if tt == TaskType.FORMULA or tt == TaskType.CALCULATED_COLUMN:
             if task.cell and task.formula:
-                self.xlwings.set_formula(task.cell, task.formula, sheet=task.sheet)
+                self._xlwings.set_formula(task.cell, task.formula, sheet=task.sheet)
 
         elif tt == TaskType.CELL_VALUE:
             if task.cell and task.value:
-                self.xlwings.write_cell(task.cell, task.value, sheet=task.sheet)
+                self._xlwings.write_cell(task.cell, task.value, sheet=task.sheet)
 
         elif tt == TaskType.SUBTOTAL:
             range_str = task.range or task.params.get("range", "A1:A1")
-            self.xlwings.add_subtotal(
+            self._xlwings.add_subtotal(
                 range_str,
                 group_by=task.params.get("group_by", 1),
                 function=task.params.get("function", -4157),
@@ -628,10 +691,10 @@ class ExcelEngine:
         elif tt == TaskType.SPLIT_PANES:
             row = task.params.get("row", 2)
             col = task.params.get("col", 1)
-            self.xlwings.split_panes(row, col, sheet=task.sheet)
+            self._xlwings.split_panes(row, col, sheet=task.sheet)
 
         elif tt == TaskType.ADVANCED_FILTER:
-            self.xlwings.advanced_filter(
+            self._xlwings.advanced_filter(
                 list_range=task.params.get("list_range", task.range or "A1:A1"),
                 criteria_range=task.params.get("criteria_range", ""),
                 copy_to_range=task.params.get("copy_to_range"),
@@ -642,23 +705,23 @@ class ExcelEngine:
         elif tt == TaskType.NUMBER_FORMAT:
             ref = task.range or task.cell
             if ref:
-                self.xlwings.set_number_format(
+                self._xlwings.set_number_format(
                     ref, task.params.get("format", "$#,##0.00"), sheet=task.sheet,
                 )
 
         elif tt == TaskType.COLUMN_WIDTH:
             col = task.params.get("column", "A")
             width = task.params.get("width", 12)
-            self.xlwings.set_column_width(col, width, sheet=task.sheet)
+            self._xlwings.set_column_width(col, width, sheet=task.sheet)
 
         elif tt == TaskType.TABLE_STYLE:
             table_name = task.params.get("table_name", "Table1")
             style = task.style or task.params.get("style", "TableStyleMedium5")
             sheet = task.sheet or "Sheet1"
-            self.xlwings.set_table_style(table_name, style, sheet)
+            self._xlwings.set_table_style(table_name, style, sheet)
 
         elif tt == TaskType.SAVE:
-            self.xlwings.save()
+            self._xlwings.save()
 
         elif tt in (
             TaskType.CHART_SCATTER, TaskType.CHART_AREA,
@@ -675,7 +738,7 @@ class ExcelEngine:
             secondary = None
             if tt == TaskType.CHART_COMBO:
                 secondary = task.params.get("secondary_axis_series", [1])
-            self.xlwings.add_chart(
+            self._xlwings.add_chart(
                 chart_type=_TYPE_MAP[tt],
                 data_range=task.params.get("data_range", task.range or "A1:B10"),
                 sheet=task.sheet,
@@ -685,7 +748,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.SPARKLINE:
-            self.xlwings.add_sparkline(
+            self._xlwings.add_sparkline(
                 data_range=task.params.get("data_range", task.range or "B2:M2"),
                 location_range=task.params.get("location_range", task.cell or "N2"),
                 sparkline_type=task.params.get("sparkline_type", "line"),
@@ -707,40 +770,40 @@ class ExcelEngine:
 
         if tt == TaskType.FORMULA or tt == TaskType.CALCULATED_COLUMN:
             if task.cell and task.formula:
-                self.applescript.set_cell_formula(
+                self._applescript.set_cell_formula(
                     task.cell, task.formula, sheet=task.sheet,
                 )
 
         elif tt == TaskType.CELL_VALUE:
             if task.cell:
-                self.applescript.set_cell_value(
+                self._applescript.set_cell_value(
                     task.cell, str(task.value or ""), sheet=task.sheet,
                 )
 
         elif tt == TaskType.SORT:
             range_str = task.range or task.params.get("range", "A1:A1")
             keys = task.params.get("keys", [])
-            self.applescript.sort_range(range_str, keys, sheet=task.sheet)
+            self._applescript.sort_range(range_str, keys, sheet=task.sheet)
 
         elif tt == TaskType.AUTOFILTER:
             range_str = task.range or task.params.get("range", "A1:A1")
             field_num = task.params.get("field", 1)
             criteria = task.params.get("criteria", "*")
-            self.applescript.set_autofilter(
+            self._applescript.set_autofilter(
                 range_str, field_num, criteria, sheet=task.sheet,
             )
 
         elif tt == TaskType.FREEZE_PANES:
             cell = task.cell or "A2"
-            self.applescript.freeze_panes(cell, sheet=task.sheet)
+            self._applescript.freeze_panes(cell, sheet=task.sheet)
 
         elif tt == TaskType.SAVE:
-            self.applescript.save()
+            self._applescript.save()
 
         elif tt == TaskType.SAVE_AS:
             path = task.params.get("path", str(self.config.desktop_path))
             filename = task.params.get("filename", "output")
-            self.applescript.save_as_xlsx(path, filename)
+            self._applescript.save_as_xlsx(path, filename)
 
         else:
             raise NotImplementedError(
@@ -753,21 +816,21 @@ class ExcelEngine:
 
         if tt == TaskType.SLICER:
             fields = task.params.get("fields", [])
-            self.system_events.insert_slicer(fields)
+            self._system_events.insert_slicer(fields)
             # Configure if specified
             if task.params.get("columns") or task.params.get("caption"):
-                self.system_events.configure_slicer(
+                self._system_events.configure_slicer(
                     columns=task.params.get("columns"),
                     caption=task.params.get("caption"),
                 )
 
         elif tt == TaskType.CHART_HISTOGRAM:
-            self.system_events.insert_histogram(
+            self._system_events.insert_histogram(
                 data_range=task.range or task.params.get("data_range"),
             )
             # Configure bins if specified
             if any(k in task.params for k in ("bin_width", "overflow", "underflow")):
-                self.system_events.configure_histogram_bins(
+                self._system_events.configure_histogram_bins(
                     bin_width=task.params.get("bin_width"),
                     overflow=task.params.get("overflow"),
                     underflow=task.params.get("underflow"),
@@ -775,21 +838,21 @@ class ExcelEngine:
 
         elif tt == TaskType.TABLE_STYLE:
             style = task.style or task.params.get("style", "TableStyleMedium5")
-            self.system_events.apply_table_style_via_ribbon(style)
+            self._system_events.apply_table_style_via_ribbon(style)
 
         elif tt == TaskType.CHART_SCATTER:
-            self.system_events.insert_scatter_chart(
+            self._system_events.insert_scatter_chart(
                 data_range=task.range or task.params.get("data_range"),
             )
 
         elif tt == TaskType.CHART_COMBO:
-            self.system_events.insert_combo_chart(
+            self._system_events.insert_combo_chart(
                 data_range=task.range or task.params.get("data_range"),
                 secondary_axis=task.params.get("secondary_axis", True),
             )
 
         elif tt == TaskType.SPARKLINE:
-            self.system_events.insert_sparkline(
+            self._system_events.insert_sparkline(
                 data_range=task.params.get("data_range", task.range or "B2:M2"),
                 location_range=task.params.get("location_range", task.cell or "N2"),
                 sparkline_type=task.params.get("sparkline_type", "Line"),
@@ -805,7 +868,7 @@ class ExcelEngine:
         tt = task.task_type
 
         if tt == TaskType.PIVOT_TABLE:
-            self.vba.create_pivot_table(
+            self._vba.create_pivot_table(
                 source_sheet=task.params.get("source_sheet", task.sheet or "Sheet1"),
                 source_range=task.params.get("source_range", task.range or "A1:A1"),
                 dest_sheet=task.params.get("dest_sheet", "PivotSheet"),
@@ -818,7 +881,7 @@ class ExcelEngine:
             )
 
         elif tt == TaskType.PIVOT_CHART:
-            self.vba.create_pivot_chart(
+            self._vba.create_pivot_chart(
                 pivot_table_name=task.params.get("pivot_table_name", "PivotTable1"),
                 chart_type=task.params.get("chart_type", "xlColumnClustered"),
                 chart_title=task.params.get("chart_title", ""),
@@ -841,28 +904,28 @@ class ExcelEngine:
 
     def _save_workbook(self, workbook: Path) -> None:
         """Save via the best available method."""
-        if self.openpyxl.wb:
-            self.openpyxl.save(workbook)
-        elif self.xlwings._wb:
-            self.xlwings.save()
+        if self._openpyxl.wb:
+            self._openpyxl.save(workbook)
+        elif self._xlwings._wb:
+            self._xlwings.save()
         else:
             try:
-                self.applescript.save()
+                self._applescript.save()
             except Exception:
                 logger.warning("Could not save workbook")
 
     def _cleanup(self) -> None:
         """Clean up all layer connections."""
         try:
-            self.openpyxl.close()
+            self._openpyxl.close()
         except Exception as e:
             logger.warning("Cleanup failed for openpyxl: %s", e)
         try:
-            self.xlwings.disconnect()
+            self._xlwings.disconnect()
         except Exception as e:
             logger.warning("Cleanup failed for xlwings: %s", e)
         try:
-            self.verifier.close()
+            self._verifier.close()
         except Exception as e:
             logger.warning("Cleanup failed for verifier: %s", e)
 
@@ -870,16 +933,16 @@ class ExcelEngine:
 
     def scan(self, instructions: Path) -> list[Task]:
         """Phase 1: Scan instructions and extract tasks."""
-        text = self.parser.parse(instructions)
-        return self.extractor.extract(text)
+        text = self._parser.parse(instructions)
+        return self._extractor.extract(text)
 
     def plan(self, tasks: list[Task]) -> ExecutionPlan:
         """Phase 2: Create an execution plan from tasks."""
-        return self.planner.plan(tasks)
+        return self._planner.plan(tasks)
 
     def verify(self, workbook: Path, tasks: list[Task]) -> SectionVerification:
         """Verify a set of tasks against a workbook."""
-        self.verifier.load(workbook)
-        result = self.verifier.verify_section("manual", tasks)
-        self.verifier.close()
+        self._verifier.load(workbook)
+        result = self._verifier.verify_section("manual", tasks)
+        self._verifier.close()
         return result

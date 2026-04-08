@@ -79,6 +79,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     config = _load_config(args.config)
+
+    # Configure layer order based on --phase
+    phase = getattr(args, "phase", "both")
+    if phase == "1":
+        config.layer_order = [Layer.OPENPYXL]
+    elif phase == "2":
+        config.layer_order = [
+            Layer.XLWINGS, Layer.APPLESCRIPT,
+            Layer.SYSTEM_EVENTS, Layer.VBA, Layer.PYAUTOGUI,
+        ]
+    # else "both" — keep default layer_order
+
     engine = ExcelEngine(config=config)
 
     print(f"── Excel Engine v{excel_engine.__version__} ──")
@@ -88,9 +100,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         # Parse and plan only
-        text = engine.parser.parse(instructions)
-        tasks = engine.extractor.extract(text)
-        plan = engine.planner.plan(tasks)
+        text = engine._parser.parse(instructions)
+        tasks = engine._extractor.extract(text)
+        plan = engine._planner.plan(tasks)
         print("DRY RUN — execution plan:")
         print(plan.summary())
         print(f"\nEstimated time: {plan.estimated_time_seconds:.0f}s")

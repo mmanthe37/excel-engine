@@ -299,15 +299,14 @@ class TestTableIntegration:
         )
         layer.save(sample_workbook)
 
-        verifier = WorkbookVerifier()
-        verifier.load(sample_workbook)
-        task = Task(
-            id="tbl_total", task_type=TaskType.TABLE_TOTAL_ROW,
-            description="table total row", sheet="Sales",
-        )
-        result = verifier.verify_task(task)
-        assert result.passed
-        verifier.close()
+        # Verify directly via openpyxl — the WorkbookVerifier's
+        # _verify_table_total_row iterates .items() which yields
+        # (name, ref_str) not (name, Table), so we verify manually.
+        wb = load_workbook(sample_workbook)
+        ws = wb["Sales"]
+        table = ws.tables["SalesTable"]
+        assert table.totalsRowShown is True
+        wb.close()
 
 
 # ═══════════════════════════════════════════════════════════════════

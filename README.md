@@ -7,7 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PyPI](https://img.shields.io/badge/PyPI-coming%20soon-orange.svg)](#installation)
+[![PyPI](https://img.shields.io/pypi/v/excel-engine.svg)](https://pypi.org/project/excel-engine/)
 
 **A 6-layer desktop automation engine that completes Microsoft Excel assignments autonomously on macOS.**
 

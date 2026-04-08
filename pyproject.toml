@@ -55,7 +55,9 @@ dev = [
 excel-engine = "excel_engine.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/excel-engine/excel-engine"
+Homepage = "https://github.com/mmanthe37/excel-engine"
+Repository = "https://github.com/mmanthe37/excel-engine"
+"Bug Tracker" = "https://github.com/mmanthe37/excel-engine/issues"
 
 [tool.setuptools.packages.find]
 include = ["excel_engine*"]

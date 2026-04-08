@@ -5,7 +5,7 @@ Tests for the instruction parser and task extractor.
 import pytest
 from pathlib import Path
 
-from excel_engine.parsers.instruction_parser import InstructionParser
+from excel_engine.parsers.instruction_parser import InstructionParser, InstructionStep
 from excel_engine.parsers.task_extractor import TaskExtractor, Task
 from excel_engine.config import TaskType
 
@@ -392,3 +392,239 @@ class TestTaskExtractor:
             "On the 'Q1 Sales' sheet, format the header row as bold"
         )
         assert any(t.sheet == "Q1 Sales" for t in tasks if t.sheet)
+
+
+# ── New: Structured Step Parsing Tests ──
+
+class TestSplitIntoSteps:
+    """Tests for InstructionParser.split_into_steps()."""
+
+    def setup_method(self):
+        self.parser = InstructionParser()
+
+    def test_numbered_steps(self):
+        text = (
+            "1. Enter the value 100 in cell A1\n"
+            "2. Format the range A1:A10 as currency\n"
+            "3. Create a bar chart from A1:B10\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 3
+        assert steps[0].step_number == 1
+        assert "Enter the value" in steps[0].text
+        assert steps[2].step_number == 3
+        assert steps[0].parent_step is None
+
+    def test_lettered_substeps(self):
+        text = (
+            "1. Format the header row:\n"
+            "a. Bold the text\n"
+            "b. Center align\n"
+            "c. Apply blue fill\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 4
+        # a, b, c should be children of step 1
+        assert steps[1].parent_step == 1
+        assert steps[2].parent_step == 1
+        assert steps[3].parent_step == 1
+
+    def test_bullet_points(self):
+        text = (
+            "1. Apply the following formatting:\n"
+            "• Bold the header\n"
+            "- Add borders\n"
+            "▪ Change font color\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 4
+        # Bullets inherit current parent
+        assert steps[1].parent_step == 1
+        assert steps[2].parent_step == 1
+        assert steps[3].parent_step == 1
+
+    def test_sam_action_verb_lines(self):
+        text = (
+            "Enter the value 500 in cell B2\n"
+            "Format cell B2 as Accounting\n"
+            "Go to the Revenue worksheet\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 3
+        assert "Enter" in steps[0].text
+        assert "Format" in steps[1].text
+        assert "Go to" in steps[2].text
+
+    def test_prefixed_steps(self):
+        text = (
+            "Step 1: Open the workbook\n"
+            "Step 2: Go to the Data worksheet\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 2
+        assert "Open the workbook" in steps[0].text
+
+    def test_mixed_formats(self):
+        text = (
+            "1. Go to the Revenue worksheet\n"
+            "a. Enter 100 in cell A1\n"
+            "b. Enter 200 in cell A2\n"
+            "2. Create a table from A1:B10\n"
+            "• Add a total row\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        assert len(steps) == 5
+        assert steps[1].parent_step is not None
+        assert steps[2].parent_step is not None
+
+
+class TestCarryContext:
+    """Tests for InstructionParser.carry_context()."""
+
+    def setup_method(self):
+        self.parser = InstructionParser()
+
+    def test_sheet_context_inherited(self):
+        steps = [
+            InstructionStep(1, "Go to the Revenue worksheet"),
+            InstructionStep(2, "Enter 100 in cell A1"),
+            InstructionStep(3, "Format cell A1 as bold"),
+        ]
+        result = self.parser.carry_context(steps)
+        assert result[0].sheet_context == "Revenue"
+        assert result[1].sheet_context == "Revenue"
+        assert result[2].sheet_context == "Revenue"
+
+    def test_sheet_context_switches(self):
+        steps = [
+            InstructionStep(1, "Go to the Revenue worksheet"),
+            InstructionStep(2, "Enter 100 in cell A1"),
+            InstructionStep(3, "Switch to the Expenses worksheet"),
+            InstructionStep(4, "Enter 200 in cell A1"),
+        ]
+        result = self.parser.carry_context(steps)
+        assert result[1].sheet_context == "Revenue"
+        assert result[3].sheet_context == "Expenses"
+
+    def test_table_name_context(self):
+        steps = [
+            InstructionStep(1, "In the Calls table, sort by date"),
+            InstructionStep(2, "Add a total row to the table"),
+        ]
+        result = self.parser.carry_context(steps)
+        assert "Calls" in result[1].text
+
+
+class TestResolveCrossReferences:
+    """Tests for InstructionParser.resolve_cross_references()."""
+
+    def setup_method(self):
+        self.parser = InstructionParser()
+
+    def test_repeat_for_column(self):
+        steps = [
+            InstructionStep(1, "Format column C as currency"),
+            InstructionStep(2, "Repeat for column D"),
+        ]
+        result = self.parser.resolve_cross_references(steps)
+        assert "cross-ref" in result[1].text
+        assert "column D" in result[1].text.lower() or "D" in result[1].text
+
+    def test_using_same_format(self):
+        steps = [
+            InstructionStep(1, "Apply bold formatting to the header"),
+            InstructionStep(2, "Format cells B1:B10 using the same format"),
+        ]
+        result = self.parser.resolve_cross_references(steps)
+        assert "cross-ref" in result[1].text
+        assert "same format" in result[1].text
+
+    def test_no_cross_ref_leaves_step_unchanged(self):
+        steps = [
+            InstructionStep(1, "Enter 100 in cell A1"),
+            InstructionStep(2, "Enter 200 in cell A2"),
+        ]
+        result = self.parser.resolve_cross_references(steps)
+        assert result[0].text == "Enter 100 in cell A1"
+        assert result[1].text == "Enter 200 in cell A2"
+
+
+class TestExtractFromSteps:
+    """Tests for TaskExtractor.extract_from_steps()."""
+
+    def setup_method(self):
+        self.extractor = TaskExtractor()
+        self.parser = InstructionParser()
+
+    def test_sheet_context_propagated_to_tasks(self):
+        steps = [
+            InstructionStep(1, "Enter the formula =SUM(A1:A10) in cell B1",
+                            sheet_context="Revenue"),
+            InstructionStep(2, "Create a bar chart from B1:B10",
+                            sheet_context="Revenue"),
+        ]
+        tasks = self.extractor.extract_from_steps(steps)
+        assert len(tasks) >= 2
+        assert all(t.sheet == "Revenue" for t in tasks)
+
+    def test_step_number_in_params(self):
+        steps = [
+            InstructionStep(1, "Enter the formula =SUM(A1:A10) in cell B1"),
+        ]
+        tasks = self.extractor.extract_from_steps(steps)
+        assert len(tasks) >= 1
+        assert tasks[0].params.get("step_number") == 1
+
+    def test_explicit_sheet_overrides_context(self):
+        steps = [
+            InstructionStep(
+                1,
+                "On the sheet Expenses, create a bar chart from A1:A10",
+                sheet_context="Revenue",
+            ),
+        ]
+        tasks = self.extractor.extract_from_steps(steps)
+        chart_tasks = [t for t in tasks if t.task_type == TaskType.CHART_BAR]
+        assert len(chart_tasks) >= 1
+        assert chart_tasks[0].sheet == "Expenses"
+
+    def test_end_to_end_pipeline(self):
+        """Full pipeline: split → carry_context → resolve_cross_refs → extract_from_steps."""
+        text = (
+            "1. Go to the Revenue worksheet\n"
+            "2. Enter the formula =SUM(A1:A10) in cell B1\n"
+            "3. Add conditional formatting to highlight cells greater than 100\n"
+            "4. Switch to the Expenses worksheet\n"
+            "5. Create a bar chart from the data in A1:D20\n"
+        )
+        steps = self.parser.split_into_steps(text)
+        steps = self.parser.carry_context(steps)
+        steps = self.parser.resolve_cross_references(steps)
+        tasks = self.extractor.extract_from_steps(steps)
+
+        assert len(tasks) >= 3
+        # Steps 2 and 3 should inherit Revenue
+        revenue_tasks = [t for t in tasks if t.sheet == "Revenue"]
+        assert len(revenue_tasks) >= 2
+        # Step 5 should have Expenses
+        expense_tasks = [t for t in tasks if t.sheet == "Expenses"]
+        assert len(expense_tasks) >= 1
+
+
+class TestConditionalInstructions:
+    """Tests for conditional instruction pattern matching."""
+
+    def setup_method(self):
+        self.extractor = TaskExtractor()
+
+    def test_if_value_greater_than(self):
+        tasks = self.extractor.extract(
+            "If the value in cell A1 is greater than 100, apply red fill"
+        )
+        assert any(t.task_type == TaskType.CONDITIONAL_FORMAT for t in tasks)
+
+    def test_when_total_exceeds(self):
+        tasks = self.extractor.extract(
+            "When the total exceeds 5000, highlight the row"
+        )
+        assert any(t.task_type == TaskType.CONDITIONAL_FORMAT for t in tasks)

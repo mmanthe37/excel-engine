@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from excel_engine.config import TaskType
+from excel_engine.parsers.instruction_parser import InstructionStep
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,9 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:above|below)\s+average\s+(?:rule|formatting|highlight)"),
         _p(r"duplicate\s+values?\s+(?:rule|formatting|highlight)"),
         _p(r"new\s+(?:formatting\s+)?rule"),
+        # Conditional instruction patterns (if/when value conditions)
+        _p(r"if\s+(?:the\s+)?value\s+in\s+cell\s+[A-Z]{1,3}\d{1,7}\s+is\s+(?:greater|less|equal|not)"),
+        _p(r"when\s+(?:the\s+)?(?:total|value|sum|count)\s+(?:exceeds?|is\s+(?:greater|less|over|under))"),
     ],
 
     # ── Number Format ──
@@ -447,6 +451,34 @@ class TaskExtractor:
         self._resolve_dependencies(tasks)
 
         logger.info("Extracted %d tasks from instructions", len(tasks))
+        return tasks
+
+    def extract_from_steps(self, steps: list[InstructionStep]) -> list[Task]:
+        """
+        Extract tasks from pre-parsed InstructionStep objects.
+
+        Uses each step's ``sheet_context`` as the default sheet when the
+        step text does not contain an explicit sheet reference.  Processes
+        steps in order, maintaining context, and returns tasks with proper
+        sheet assignments.  Complements (does not replace) ``extract()``.
+        """
+        self._counter = 0
+        tasks: list[Task] = []
+
+        for step in steps:
+            line_tasks = self._extract_from_line(step.text)
+            for task in line_tasks:
+                # Inherit sheet from step context when not already set
+                if not task.sheet and step.sheet_context:
+                    task.sheet = step.sheet_context
+                # Stash parent_step reference for traceability
+                if step.parent_step is not None:
+                    task.params["parent_step"] = step.parent_step
+                task.params["step_number"] = step.step_number
+            tasks.extend(line_tasks)
+
+        self._resolve_dependencies(tasks)
+        logger.info("Extracted %d tasks from %d steps", len(tasks), len(steps))
         return tasks
 
     def _next_id(self) -> str:

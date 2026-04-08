@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from excel_engine.config import EngineConfig, TaskType, Layer, TASK_LAYER_MAP
+from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError
 from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
 from excel_engine.layers.xlwings_layer import XlwingsLayer
 from excel_engine.layers.applescript_layer import AppleScriptLayer
@@ -51,6 +52,8 @@ class EngineResult:
     tasks_total: int
     verifications: list[SectionVerification] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    task_errors: list[TaskError] = field(default_factory=list)
+    failed_tasks: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
 
     def summary(self) -> str:
@@ -65,6 +68,16 @@ class EngineResult:
             lines.append(f"  Errors ({len(self.errors)}):")
             for err in self.errors[:5]:
                 lines.append(f"    - {err}")
+        if self.failed_tasks:
+            lines.append(f"  Failed tasks ({len(self.failed_tasks)}): {', '.join(self.failed_tasks[:10])}")
+        if self.task_errors:
+            transient = sum(1 for e in self.task_errors if e.error_type == "transient")
+            permanent = sum(1 for e in self.task_errors if e.error_type == "permanent")
+            incompatible = sum(1 for e in self.task_errors if e.error_type == "layer_incompatible")
+            lines.append(
+                f"  Task errors: {len(self.task_errors)} "
+                f"(transient={transient}, permanent={permanent}, layer_incompatible={incompatible})"
+            )
         return "\n".join(lines)
 
 
@@ -209,12 +222,14 @@ class ExcelEngine:
         section_ok = True
 
         for task in section.tasks:
-            task_ok = self._execute_task(task, workbook)
+            task_ok, task_errors = self._execute_task(task, workbook)
+            result.task_errors.extend(task_errors)
             if task_ok:
                 task.completed = True
                 result.tasks_completed += 1
             else:
                 section_ok = False
+                result.failed_tasks.append(task.id)
                 result.errors.append(
                     f"Task {task.id} ({task.task_type.value}) failed"
                 )
@@ -241,30 +256,63 @@ class ExcelEngine:
 
     # ── Task Execution ──
 
-    def _execute_task(self, task: Task, workbook: Path) -> bool:
-        """Execute a single task using the appropriate layer(s)."""
+    def _execute_task(self, task: Task, workbook: Path) -> tuple[bool, list[TaskError]]:
+        """Execute a single task with retry logic and layer cascade.
+
+        Returns (success, list_of_errors).
+        """
         layers_to_try = self.config.get_layers_for_task(task.task_type)
+        collected_errors: list[TaskError] = []
 
         if not layers_to_try:
             logger.warning("No layer can handle task type: %s", task.task_type.value)
-            return False
+            return False, collected_errors
+
+        strategy = RecoveryStrategy(
+            max_retries=self.config.max_retries,
+            base_delay=self.config.retry_delay,
+        )
 
         for layer_enum in layers_to_try:
-            try:
-                logger.info(
-                    "  Task %s: %s via Layer %s",
-                    task.id, task.task_type.value, layer_enum.name,
-                )
-                self._dispatch_task(task, layer_enum, workbook)
-                return True
-            except Exception as e:
-                logger.warning(
-                    "  Layer %s failed for %s: %s — trying next",
-                    layer_enum.name, task.id, e,
-                )
+            attempt = 0
+            while True:
+                try:
+                    logger.info(
+                        "  Task %s: %s via Layer %s (attempt %d)",
+                        task.id, task.task_type.value, layer_enum.name, attempt + 1,
+                    )
+                    self._dispatch_task(task, layer_enum, workbook)
+                    return True, collected_errors
+                except Exception as e:
+                    error_type = ErrorClassifier.classify(e, layer_enum)
+                    task_error = TaskError(
+                        task_id=task.id,
+                        task_type=task.task_type,
+                        layer=layer_enum,
+                        error_type=error_type,
+                        message=str(e),
+                        timestamp=time.time(),
+                    )
+                    collected_errors.append(task_error)
+
+                    if strategy.should_retry(error_type, attempt):
+                        delay = strategy.get_delay(attempt)
+                        logger.warning(
+                            "  Layer %s transient error for %s (attempt %d/%d): %s — retrying in %.1fs",
+                            layer_enum.name, task.id, attempt + 1,
+                            strategy.max_retries, e, delay,
+                        )
+                        time.sleep(delay)
+                        attempt += 1
+                    else:
+                        logger.warning(
+                            "  Layer %s %s error for %s: %s — escalating to next layer",
+                            layer_enum.name, error_type, task.id, e,
+                        )
+                        break  # move to next layer
 
         logger.error("All layers failed for task %s", task.id)
-        return False
+        return False, collected_errors
 
     def _dispatch_task(
         self, task: Task, layer: Layer, workbook: Path

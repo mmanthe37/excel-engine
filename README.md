@@ -23,7 +23,7 @@
 - **Section-Based Planning** — Reads assignment instructions, decomposes into ordered checkpoints, and executes them sequentially
 - **114+ Checkpoint Trained** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
 - **Self-Healing Execution** — Automatic retry with layer escalation when a step fails
-- **5 Distribution Formats** — Use as a Python library, CLI tool, MCP Server, Copilot CLI Extension, or Copilot Plugin
+- **5 Distribution Formats** — Use as a Python library, CLI tool, MCP Server (recommended AI interface), Copilot CLI Extension *(deprecated — use MCP Server)*, or Copilot Plugin
 - **macOS-Native** — Built specifically for Microsoft Excel for Mac 365 using AppleScript, System Events, and Accessibility APIs
 
 ## Quick Start
@@ -98,11 +98,11 @@ pip3 install excel-engine[mcp]
 excel-engine mcp install
 ```
 
-### Copilot CLI Extension
+### Copilot CLI Extension *(Deprecated — use MCP Server)*
 
 ```bash
-# Register as a Copilot CLI extension
-excel-engine extension install
+# DEPRECATED — use the MCP Server instead.
+# See mcp-server/README.md for setup instructions.
 ```
 
 ### Copilot Plugin
@@ -174,12 +174,10 @@ When running as an MCP server, Excel Engine exposes tools for:
 }
 ```
 
-### Copilot CLI Extension
+### Copilot CLI Extension *(Deprecated)*
 
-```bash
-# Use with GitHub Copilot CLI
-copilot "Complete the Excel assignment in Module3.rtfd using NP_EX_3-2.xlsx"
-```
+> **Note:** The Copilot CLI Extension is deprecated. Use the MCP Server for
+> AI-powered interactions. See [`mcp-server/README.md`](mcp-server/README.md).
 
 ### Copilot Plugin
 

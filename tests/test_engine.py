@@ -125,3 +125,136 @@ class TestExcelEngine:
         summary = result.summary()
         assert "SUCCESS" in summary
         assert "10/10" in summary
+
+
+# ── Recovery tests ──
+
+from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError
+
+
+class TestErrorClassifier:
+    def test_transient_timeout(self):
+        err = RuntimeError("AppleEvent timed out after 30s")
+        assert ErrorClassifier.classify(err, Layer.APPLESCRIPT) == "transient"
+
+    def test_transient_busy(self):
+        err = RuntimeError("Excel is busy")
+        assert ErrorClassifier.classify(err, Layer.XLWINGS) == "transient"
+
+    def test_transient_not_responding(self):
+        err = RuntimeError("Application not responding")
+        assert ErrorClassifier.classify(err, Layer.APPLESCRIPT) == "transient"
+
+    def test_permanent_file_not_found(self):
+        err = FileNotFoundError("No such file")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "permanent"
+
+    def test_permanent_no_such_sheet(self):
+        err = KeyError("No such sheet 'Data'")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "permanent"
+
+    def test_permanent_not_supported(self):
+        err = ValueError("Feature not supported in this layer")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "permanent"
+
+    def test_layer_incompatible_not_implemented(self):
+        err = NotImplementedError("sparklines not available")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "layer_incompatible"
+
+    def test_layer_incompatible_attribute_error(self):
+        err = AttributeError("no attribute 'create_sparkline'")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "layer_incompatible"
+
+    def test_unknown_error_defaults_permanent(self):
+        err = ZeroDivisionError("boom")
+        assert ErrorClassifier.classify(err, Layer.OPENPYXL) == "permanent"
+
+
+class TestRecoveryStrategy:
+    def test_should_retry_transient(self):
+        rs = RecoveryStrategy(max_retries=3)
+        assert rs.should_retry("transient", 0) is True
+        assert rs.should_retry("transient", 2) is True
+        assert rs.should_retry("transient", 3) is False
+
+    def test_should_not_retry_permanent(self):
+        rs = RecoveryStrategy(max_retries=3)
+        assert rs.should_retry("permanent", 0) is False
+
+    def test_should_not_retry_layer_incompatible(self):
+        rs = RecoveryStrategy(max_retries=3)
+        assert rs.should_retry("layer_incompatible", 0) is False
+
+    def test_get_delay_exponential(self):
+        rs = RecoveryStrategy(base_delay=1.0, max_delay=30.0)
+        d0 = rs.get_delay(0)
+        d1 = rs.get_delay(1)
+        d2 = rs.get_delay(2)
+        # base * 2^attempt + small jitter
+        assert 1.0 <= d0 <= 1.2
+        assert 2.0 <= d1 <= 2.3
+        assert 4.0 <= d2 <= 4.5
+
+    def test_get_delay_capped(self):
+        rs = RecoveryStrategy(base_delay=1.0, max_delay=5.0)
+        d10 = rs.get_delay(10)  # 1 * 2^10 = 1024, capped to 5
+        assert d10 <= 5.6  # 5 + 10% jitter
+
+    def test_get_delay_custom_base(self):
+        rs = RecoveryStrategy(base_delay=2.0, max_delay=30.0)
+        d0 = rs.get_delay(0)
+        assert 2.0 <= d0 <= 2.3
+
+
+class TestEngineResultWithErrors:
+    def test_summary_includes_failed_tasks(self):
+        result = EngineResult(
+            success=False,
+            workbook_path=Path("test.xlsx"),
+            sections_completed=1,
+            sections_total=2,
+            tasks_completed=5,
+            tasks_total=8,
+            failed_tasks=["t3", "t5", "t7"],
+            elapsed_seconds=30.0,
+        )
+        summary = result.summary()
+        assert "FAILED" in summary
+        assert "Failed tasks (3)" in summary
+        assert "t3" in summary
+
+    def test_summary_includes_task_error_breakdown(self):
+        import time as _time
+        errors = [
+            TaskError("t1", TaskType.FORMULA, Layer.OPENPYXL, "transient", "busy", _time.time()),
+            TaskError("t1", TaskType.FORMULA, Layer.OPENPYXL, "transient", "busy", _time.time()),
+            TaskError("t1", TaskType.FORMULA, Layer.XLWINGS, "permanent", "no sheet", _time.time()),
+        ]
+        result = EngineResult(
+            success=False,
+            workbook_path=Path("test.xlsx"),
+            sections_completed=0,
+            sections_total=1,
+            tasks_completed=0,
+            tasks_total=1,
+            task_errors=errors,
+            elapsed_seconds=10.0,
+        )
+        summary = result.summary()
+        assert "Task errors: 3" in summary
+        assert "transient=2" in summary
+        assert "permanent=1" in summary
+
+    def test_empty_errors_no_extra_lines(self):
+        result = EngineResult(
+            success=True,
+            workbook_path=Path("test.xlsx"),
+            sections_completed=1,
+            sections_total=1,
+            tasks_completed=5,
+            tasks_total=5,
+            elapsed_seconds=5.0,
+        )
+        summary = result.summary()
+        assert "Failed tasks" not in summary
+        assert "Task errors" not in summary

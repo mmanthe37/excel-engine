@@ -199,11 +199,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         planner = TaskPlanner(config=_load_config(args.config))
         plan = planner.plan(tasks)
 
+        verifier.load(workbook)
         results = []
         for section in plan.sections:
-            sv = verifier.verify_section(workbook, section)
+            sv = verifier.verify_section(section.id, section.tasks)
             results.append(sv)
             print(sv.summary())
+        verifier.close()
 
         overall = all(sv.all_passed for sv in results)
         print(f"\nOverall: {'✓ ALL PASSED' if overall else '✗ SOME FAILED'}")

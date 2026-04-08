@@ -236,7 +236,7 @@ class WorkbookVerifier:
 
                 return VerificationResult(
                     task_id=task.id, task_type=task.task_type,
-                    passed=True,  # formula present is a pass; exact match is bonus
+                    passed=exact_match,
                     message=(
                         f"Formula match: {cell_value}"
                         if exact_match

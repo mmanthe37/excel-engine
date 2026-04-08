@@ -185,7 +185,8 @@ class XlwingsLayer:
         Must select the split cell first.
         """
         ws = self._ws(sheet)
-        cell_ref = f"{chr(64 + col)}{row}"
+        from openpyxl.utils import get_column_letter
+        cell_ref = f"{get_column_letter(col)}{row}"
         ws.range(cell_ref).select()
         self._app.api.active_window.split.set(True)
         logger.info("Split panes at row %d, col %d", row, col)

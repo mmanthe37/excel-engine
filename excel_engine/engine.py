@@ -511,6 +511,85 @@ class ExcelEngine:
             if task.params.get("print_area"):
                 self.openpyxl.set_print_area(task.params["print_area"], sheet=task.sheet)
 
+        # Formula-based types — delegate to existing set_formula
+        elif tt in (TaskType.TEXT_FUNCTION, TaskType.LOOKUP_FUNCTION,
+                    TaskType.FILTER_FUNCTION, TaskType.SORT_FUNCTION,
+                    TaskType.UNIQUE_FUNCTION, TaskType.THREE_D_REFERENCE,
+                    TaskType.EXTERNAL_REFERENCE):
+            if task.cell and task.formula:
+                self.openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
+            elif task.cell and task.value:
+                self.openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
+
+        # Table total row
+        elif tt == TaskType.TABLE_TOTAL_ROW:
+            # openpyxl tables support totalsRowShown
+            ws = self.openpyxl._ws(task.sheet)
+            for table in ws.tables.values():
+                if not task.params.get("name") or table.name == task.params.get("name"):
+                    table.totalsRowShown = True
+                    break
+
+        # Row height
+        elif tt == TaskType.ROW_HEIGHT:
+            ws = self.openpyxl._ws(task.sheet)
+            row_num = int(task.cell[1:]) if task.cell else task.params.get("row", 1)
+            height = task.params.get("size", task.params.get("height", 15))
+            ws.row_dimensions[row_num].height = height
+
+        # Tab color
+        elif tt == TaskType.TAB_COLOR:
+            ws = self.openpyxl._ws(task.sheet)
+            color = task.params.get("color", "FF0000")
+            ws.sheet_properties.tabColor = color
+
+        # Page break
+        elif tt == TaskType.PAGE_BREAK:
+            from openpyxl.worksheet.pagebreak import Break
+            ws = self.openpyxl._ws(task.sheet)
+            row_num = int(task.cell[1:]) if task.cell else task.params.get("row", 1)
+            ws.row_breaks.append(Break(id=row_num))
+
+        # Hyperlink
+        elif tt == TaskType.HYPERLINK:
+            ws = self.openpyxl._ws(task.sheet)
+            cell = ws[task.cell]
+            url = task.params.get("url", task.value or "")
+            display = task.params.get("display", url)
+            cell.hyperlink = url
+            cell.value = display
+            cell.style = "Hyperlink"
+
+        # Sheet move (reorder)
+        elif tt == TaskType.SHEET_MOVE:
+            if task.sheet:
+                idx = task.params.get("position", 0)
+                self.openpyxl.wb.move_sheet(task.sheet, offset=idx)
+
+        # Sheet copy
+        elif tt == TaskType.SHEET_COPY:
+            source = task.sheet or task.params.get("source")
+            new_name = task.params.get("new_name", f"{source} Copy")
+            ws = self.openpyxl.wb.copy_worksheet(self.openpyxl.wb[source])
+            ws.title = new_name
+
+        # Generic FORMATTING — apply whatever params specify
+        elif tt == TaskType.FORMATTING:
+            if task.cell or task.range:
+                target = task.cell or task.range
+                ws = self.openpyxl._ws(task.sheet)
+                # Delegate to font/fill/border/alignment based on params
+                from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+                cells = ws[target] if ':' in str(target) else [[ws[target]]]
+                for row in cells:
+                    for c in (row if hasattr(row, '__iter__') else [row]):
+                        if task.params.get("bold") or task.params.get("font_size") or task.params.get("font_color"):
+                            c.font = Font(
+                                bold=task.params.get("bold", False),
+                                size=task.params.get("font_size"),
+                                color=task.params.get("font_color"),
+                            )
+
         else:
             raise NotImplementedError(
                 f"openpyxl handler not implemented for {tt.value}"
@@ -776,16 +855,16 @@ class ExcelEngine:
         """Clean up all layer connections."""
         try:
             self.openpyxl.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Cleanup failed for openpyxl: %s", e)
         try:
             self.xlwings.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Cleanup failed for xlwings: %s", e)
         try:
             self.verifier.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Cleanup failed for verifier: %s", e)
 
     # ── Convenience Methods ──
 

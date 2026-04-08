@@ -32,6 +32,11 @@ class SystemEventsLayer:
     def __init__(self, delay: float = 0.5) -> None:
         self.delay = delay
 
+    @staticmethod
+    def _escape(s: str) -> str:
+        """Escape a string for safe AppleScript interpolation."""
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
     def _run(self, script: str) -> str:
         """Execute a System Events AppleScript."""
         return MacUtils.run_applescript(script, timeout=60.0)
@@ -53,7 +58,7 @@ class SystemEventsLayer:
             f'        delay {self.delay}\n'
             f'        -- Click the ribbon tab\n'
             f'        tell tab group 1 of group 1 of tool bar 1 of window 1\n'
-            f'            click radio button "{tab_name}"\n'
+            f'            click radio button "{self._escape(tab_name)}"\n'
             f'        end tell\n'
             f'        delay {self.delay}\n'
             f'    end tell\n'
@@ -73,7 +78,7 @@ class SystemEventsLayer:
         self._activate_excel()
 
         checkboxes_script = "\n".join(
-            f'                        click checkbox "{name}" of scroll area 1 of sheet 1'
+            f'                        click checkbox "{self._escape(name)}" of scroll area 1 of sheet 1'
             for name in field_names
         )
 
@@ -141,7 +146,7 @@ class SystemEventsLayer:
             commands.append(
                 f'tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
                 f'    tell group "Slicer"\n'
-                f'        set value of text field "Caption:" to "{caption}"\n'
+                f'        set value of text field "Caption:" to "{self._escape(str(caption))}"\n'
                 f'    end tell\n'
                 f'end tell'
             )
@@ -171,7 +176,7 @@ class SystemEventsLayer:
         if data_range:
             MacUtils.run_applescript(
                 f'tell application "Microsoft Excel"\n'
-                f'    select range "{data_range}" of active sheet\n'
+                f'    select range "{self._escape(data_range)}" of active sheet\n'
                 f'end tell'
             )
             time.sleep(self.delay)
@@ -217,17 +222,17 @@ class SystemEventsLayer:
         commands = []
         if bin_width is not None:
             commands.append(
-                f'set value of text field "Bin width" of group 1 of scroll area 1 of window "Format Data Series" to "{bin_width}"'
+                f'set value of text field "Bin width" of group 1 of scroll area 1 of window "Format Data Series" to "{self._escape(str(bin_width))}"'
             )
         if overflow is not None:
             commands.append(
                 f'click checkbox "Overflow bin" of group 1 of scroll area 1 of window "Format Data Series"\n'
-                f'set value of text field "Overflow bin" of group 1 of scroll area 1 of window "Format Data Series" to "{overflow}"'
+                f'set value of text field "Overflow bin" of group 1 of scroll area 1 of window "Format Data Series" to "{self._escape(str(overflow))}"'
             )
         if underflow is not None:
             commands.append(
                 f'click checkbox "Underflow bin" of group 1 of scroll area 1 of window "Format Data Series"\n'
-                f'set value of text field "Underflow bin" of group 1 of scroll area 1 of window "Format Data Series" to "{underflow}"'
+                f'set value of text field "Underflow bin" of group 1 of scroll area 1 of window "Format Data Series" to "{self._escape(str(underflow))}"'
             )
 
         commands_str = "\n        ".join(commands)
@@ -259,7 +264,7 @@ class SystemEventsLayer:
         if data_range:
             MacUtils.run_applescript(
                 f'tell application "Microsoft Excel"\n'
-                f'    select range "{data_range}" of active sheet\n'
+                f'    select range "{self._escape(data_range)}" of active sheet\n'
                 f'end tell'
             )
             time.sleep(self.delay)
@@ -291,8 +296,6 @@ class SystemEventsLayer:
         self._run(script)
         time.sleep(2)
         logger.info("Inserted scatter chart via ribbon")
-
-    # ── Combo Chart ──
 
     def insert_combo_chart(
         self,

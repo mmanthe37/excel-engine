@@ -4,7 +4,7 @@
 
 ### Autonomous Excel Automation for macOS
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/excel-engine.svg)](https://pypi.org/project/excel-engine/)
@@ -20,9 +20,10 @@
 ## Features
 
 - **6-Layer Automation Architecture** — Cascading strategy from lightweight file I/O to full desktop control
-- **Section-Based Planning** — Reads assignment instructions, decomposes into ordered checkpoints, and executes them sequentially
-- **114+ Checkpoint Trained** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
+- **Section-Based Planning** — Reads assignment instructions, decomposes into ordered tasks, and executes them sequentially
+- **114+ Task Patterns** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
 - **Self-Healing Execution** — Automatic retry with layer escalation when a step fails
+- **Error Recovery** — Classified error handling with configurable retry and exponential backoff
 - **5 Distribution Formats** — Use as a Python library, CLI tool, MCP Server (recommended AI interface), Copilot CLI Extension *(deprecated — use MCP Server)*, or Copilot Plugin
 - **macOS-Native** — Built specifically for Microsoft Excel for Mac 365 using AppleScript, System Events, and Accessibility APIs
 
@@ -33,7 +34,7 @@
 pip3 install excel-engine
 
 # Run against an assignment
-excel-engine run --instructions assignment.rtfd --workbook workbook.xlsx
+excel-engine run assignment.xlsx instructions.docx
 ```
 
 ## Architecture
@@ -59,7 +60,7 @@ Excel Engine uses a 6-layer cascading architecture. Each layer is attempted in o
 │  └───────────────────────────────────────────────┘  │
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Planner  │→ │ Executor │→ │ Checkpoint Verify │  │
+│  │ Planner  │→ │ Executor │→ │     Verifier      │  │
 │  └──────────┘  └──────────┘  └───────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -92,10 +93,10 @@ excel-engine --help
 ### MCP Server
 
 ```bash
-pip3 install excel-engine[mcp]
+pip3 install excel-engine
 
-# Add to your MCP configuration
-excel-engine mcp install
+# Run the MCP server via stdio transport
+python mcp-server/server.py
 ```
 
 ### Copilot CLI Extension *(Deprecated — use MCP Server)*
@@ -107,71 +108,102 @@ excel-engine mcp install
 
 ### Copilot Plugin
 
-```bash
-# Register as a Copilot plugin
-excel-engine plugin install
-```
+See [`plugin/README.md`](plugin/README.md) for setup instructions.
 
 ## Usage
 
 ### CLI
 
 ```bash
-# Run a full assignment
-excel-engine run \
-  --instructions "Module 3 Instructions.rtfd" \
-  --workbook "NP_EX_3-2.xlsx"
-
-# Run a specific section
-excel-engine run \
-  --instructions "Module 3 Instructions.rtfd" \
-  --workbook "NP_EX_3-2.xlsx" \
-  --section 4
+# Run a full assignment (positional: workbook then instructions)
+excel-engine run assignment.xlsx instructions.docx
 
 # Dry run — plan without executing
-excel-engine plan \
-  --instructions "Module 3 Instructions.rtfd"
+excel-engine run assignment.xlsx instructions.docx --dry-run
 
-# Verify a completed workbook
-excel-engine verify \
-  --workbook "NP_EX_3-2.xlsx" \
-  --checkpoints checkpoints.json
+# Run only Phase 1 (openpyxl, offline)
+excel-engine run assignment.xlsx instructions.docx --phase 1
+
+# Write results to a JSON file
+excel-engine run assignment.xlsx instructions.docx --output results.json
+
+# Use a custom config file
+excel-engine run assignment.xlsx instructions.docx --config engine.json
+
+# Parse instructions into structured JSON tasks
+excel-engine parse instructions.rtfd
+excel-engine parse instructions.rtfd --output tasks.json
+
+# Verify a completed workbook (basic structural check)
+excel-engine verify completed.xlsx
+
+# Verify against specific instructions (task-based)
+excel-engine verify completed.xlsx --instructions instructions.docx
+
+# Show engine version, layers, and configuration
+excel-engine info
+
+# Check macOS environment readiness
+excel-engine check-env
+
+# Enable verbose/debug output (works with any subcommand)
+excel-engine --verbose run assignment.xlsx instructions.docx
 ```
 
 ### Python API
 
 ```python
-from excel_engine import ExcelEngine
+from pathlib import Path
+from excel_engine import ExcelEngine, EngineConfig
 
-engine = ExcelEngine()
+# Initialize with default config
+engine = ExcelEngine(config=EngineConfig())
 
-# Load assignment instructions
-engine.load_instructions("Module 3 Instructions.rtfd")
+# Full pipeline: parse → plan → execute → verify
+result = engine.run(
+    workbook=Path("assignment.xlsx"),
+    instructions=Path("instructions.docx"),
+)
+print(result.summary())
+print(f"Success: {result.success}")
+print(f"Tasks: {result.tasks_completed}/{result.tasks_total}")
 
-# Open workbook
-engine.open("NP_EX_3-2.xlsx")
+# Or pass raw text instead of a file
+result = engine.run(
+    workbook=Path("assignment.xlsx"),
+    instruction_text="Set cell B4 to =SUM(B5:B10)",
+)
 
-# Plan and execute all sections
-plan = engine.plan()
-engine.execute(plan)
+# Or pass pre-extracted tasks
+tasks = engine.scan(instructions=Path("instructions.docx"))
+plan = engine.plan(tasks)
+print(plan.summary())
 
-# Or execute a single checkpoint
-engine.execute_checkpoint("Set cell B4 to =SUM(B5:B10)")
+# Verify completion without re-executing
+verification = engine.verify(
+    workbook=Path("assignment.xlsx"),
+    tasks=tasks,
+)
+print(f"Passed: {verification.pass_count}, Failed: {verification.fail_count}")
 ```
 
 ### MCP Server
 
-When running as an MCP server, Excel Engine exposes tools for:
+The MCP server (`mcp-server/server.py`) exposes 6 tools for AI assistant integration:
 
-```json
-{
-  "tools": [
-    "excel_engine_run",
-    "excel_engine_plan",
-    "excel_engine_verify",
-    "excel_engine_execute_checkpoint"
-  ]
-}
+| Tool | Description |
+|------|-------------|
+| `complete_assignment` | Full pipeline: parse instructions → plan → execute → verify |
+| `parse_instructions` | Parse an instruction file into structured task JSON |
+| `execute_openpyxl` | Run Phase 1 offline operations via openpyxl only |
+| `execute_live` | Run Phase 2 live operations via xlwings/AppleScript/System Events/VBA/PyAutoGUI |
+| `verify_workbook` | Verify assignment completion against expected tasks |
+| `get_engine_status` | Get engine version, available layers, and configuration |
+
+Run the server:
+
+```bash
+python mcp-server/server.py
 ```
 
 ### Copilot CLI Extension *(Deprecated)*
@@ -194,17 +226,19 @@ The Copilot plugin integrates directly into GitHub Copilot Chat, allowing natura
 |------------|---------|
 | macOS | 13.0+ (Ventura or later) |
 | Microsoft Excel | Excel for Mac 365 |
-| Python | 3.11+ |
+| Python | 3.10+ |
 
 ### Python Packages
 
-| Package | Purpose |
-|---------|---------|
-| `openpyxl` | Offline .xlsx file manipulation |
-| `xlwings` | Live Excel application bridge |
-| `pyautogui` | Desktop GUI automation |
-| `python-docx` | Reading .docx/.rtfd instructions |
-| `Pillow` | Screenshot capture and image matching |
+| Package | Purpose | Required |
+|---------|---------|----------|
+| `openpyxl` | Offline .xlsx file manipulation | ✅ Yes |
+| `xlwings` | Live Excel application bridge | Optional (`pip3 install excel-engine[live]`) |
+| `pyautogui` | Desktop GUI automation | Optional (`pip3 install excel-engine[ui]`) |
+| `python-docx` | Reading .docx/.rtfd instructions | Optional (`pip3 install excel-engine[parsers]`) |
+| `pdfplumber` | Reading .pdf instructions | Optional (`pip3 install excel-engine[parsers]`) |
+
+Install everything: `pip3 install excel-engine[all]`
 
 ### macOS Permissions
 
@@ -221,23 +255,64 @@ Excel Engine requires the following macOS permissions (System Settings → Priva
 
 ```
 excel-engine/
-├── excel_engine/           # Core package
+├── excel_engine/               # Core Python package
 │   ├── __init__.py
-│   ├── engine.py           # Main orchestrator
-│   ├── planner.py          # Instruction parser & planner
-│   ├── layers/             # 6-layer automation stack
-│   │   ├── openpyxl_layer.py
-│   │   ├── xlwings_layer.py
-│   │   ├── applescript_layer.py
-│   │   ├── system_events_layer.py
-│   │   ├── vba_layer.py
-│   │   └── pyautogui_layer.py
-│   ├── cli.py              # CLI entry point
-│   ├── mcp_server.py       # MCP server
-│   └── verify.py           # Checkpoint verification
-├── docs/                   # Documentation
-├── tests/                  # Test suite
-├── pyproject.toml          # Project metadata
+│   ├── engine.py               # Main orchestrator (ExcelEngine class)
+│   ├── cli.py                  # CLI entry point (excel-engine command)
+│   ├── config.py               # EngineConfig, Layer, TaskType enums
+│   ├── interactive.py          # Interactive guided mode
+│   ├── recovery.py             # Error recovery with retry and backoff
+│   ├── layers/                 # 6-layer automation stack
+│   │   ├── __init__.py
+│   │   ├── openpyxl_layer.py   # Layer 1: offline file I/O
+│   │   ├── xlwings_layer.py    # Layer 2: live Excel bridge
+│   │   ├── applescript_layer.py # Layer 3: Excel-specific commands
+│   │   ├── system_events.py    # Layer 4: ribbon/dialog UI
+│   │   ├── vba_layer.py        # Layer 5: VBA via VBE
+│   │   └── pyautogui_layer.py  # Layer 6: last-resort desktop control
+│   ├── parsers/                # Instruction parsing
+│   │   ├── __init__.py
+│   │   ├── instruction_parser.py  # .docx/.rtfd/.pdf/.txt reader
+│   │   └── task_extractor.py      # Natural language → Task objects
+│   ├── planner/                # Execution planning
+│   │   ├── __init__.py
+│   │   ├── dependency_graph.py # Task dependency resolution
+│   │   └── task_planner.py     # Section-based ExecutionPlan builder
+│   ├── verifier/               # Completion verification
+│   │   ├── __init__.py
+│   │   └── workbook_verifier.py # Cell/formula/format/structure checks
+│   └── utils/                  # Shared utilities
+│       ├── __init__.py
+│       ├── excel_constants.py  # Excel format constants
+│       ├── mac_utils.py        # macOS-specific helpers
+│       └── path_handler.py     # Path resolution and normalization
+├── mcp-server/                 # MCP Server (AI assistant interface)
+│   ├── __main__.py
+│   └── server.py               # FastMCP server with 6 tools
+├── extensions/                 # Copilot CLI Extension (deprecated)
+│   ├── excel-engine.py
+│   └── README.md
+├── plugin/                     # Copilot Plugin
+│   ├── install.sh
+│   ├── README.md
+│   ├── agents/
+│   │   └── excel-engine-agent.md
+│   └── skills/
+│       ├── excel-automation/
+│       └── instruction-parsing/
+├── tests/                      # Test suite
+│   ├── conftest.py
+│   ├── test_engine.py
+│   ├── test_parsers.py
+│   ├── test_planner.py
+│   ├── test_layers.py
+│   ├── test_integration.py
+│   └── test_e2e_sam.py
+├── docs/                       # Documentation
+│   ├── architecture.md
+│   ├── layers.md
+│   └── troubleshooting.md
+├── pyproject.toml
 ├── README.md
 ├── LICENSE
 ├── CONTRIBUTING.md
@@ -251,5 +326,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR gu
 ## License
 
 [MIT](LICENSE) © 2026 Michael Manthe
-
-openpyxl, xlwings, AppleScript, System Events, VBA via VBE, PyAutoGUI

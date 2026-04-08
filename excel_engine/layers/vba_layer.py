@@ -42,6 +42,11 @@ class VBALayer:
         self.execution_timeout = execution_timeout
         self.split_threshold = split_threshold
 
+    @staticmethod
+    def _escape_vba(s: str) -> str:
+        """Escape a string for VBA string literals (double quotes → double-double quotes)."""
+        return s.replace('"', '""')
+
     # ── Core Execution ──
 
     def execute_vba(self, code: str) -> None:
@@ -132,13 +137,19 @@ class VBALayer:
         filter_code = self._pivot_field_code(filter_fields, "xlPageField")
         value_code = self._pivot_value_code(value_fields)
 
+        safe_source_sheet = self._escape_vba(source_sheet)
+        safe_source_range = self._escape_vba(source_range)
+        safe_dest_sheet = self._escape_vba(dest_sheet)
+        safe_dest_cell = self._escape_vba(dest_cell)
+        safe_table_name = self._escape_vba(table_name)
+
         vba = textwrap.dedent(f"""\
             Sub CleanExistingObjects()
                 Dim ws As Worksheet
-                Set ws = Sheets("{dest_sheet}")
+                Set ws = Sheets("{safe_dest_sheet}")
                 Dim pt As PivotTable
                 For Each pt In ws.PivotTables
-                    If pt.Name = "{table_name}" Then
+                    If pt.Name = "{safe_table_name}" Then
                         pt.TableRange2.Clear
                     End If
                 Next pt
@@ -149,10 +160,10 @@ class VBALayer:
                 CleanExistingObjects
 
                 Dim srcWs As Worksheet
-                Set srcWs = Sheets("{source_sheet}")
+                Set srcWs = Sheets("{safe_source_sheet}")
 
                 Dim srcRange As Range
-                Set srcRange = srcWs.Range("{source_range}")
+                Set srcRange = srcWs.Range("{safe_source_range}")
 
                 Dim pc As PivotCache
                 Set pc = ActiveWorkbook.PivotCaches.Create( _
@@ -160,12 +171,12 @@ class VBALayer:
                     SourceData:=srcRange)
 
                 Dim destWs As Worksheet
-                Set destWs = Sheets("{dest_sheet}")
+                Set destWs = Sheets("{safe_dest_sheet}")
 
                 Dim pt As PivotTable
                 Set pt = pc.CreatePivotTable( _
-                    TableDestination:=destWs.Range("{dest_cell}"), _
-                    TableName:="{table_name}")
+                    TableDestination:=destWs.Range("{safe_dest_cell}"), _
+                    TableName:="{safe_table_name}")
 
                 {row_code}
                 {col_code}
@@ -196,8 +207,11 @@ class VBALayer:
         dest_sheet: Optional[str] = None,
     ) -> None:
         """Generate and execute VBA to create a PivotChart from an existing PivotTable."""
-        dest_line = f'Set ws = Sheets("{dest_sheet}")' if dest_sheet else "Set ws = ActiveSheet"
-        title_line = f'ch.Chart.HasTitle = True\n                ch.Chart.ChartTitle.Text = "{chart_title}"' if chart_title else ""
+        safe_pivot = self._escape_vba(pivot_table_name)
+        safe_title = self._escape_vba(chart_title) if chart_title else ""
+        safe_dest = self._escape_vba(dest_sheet) if dest_sheet else ""
+        dest_line = f'Set ws = Sheets("{safe_dest}")' if dest_sheet else "Set ws = ActiveSheet"
+        title_line = f'ch.Chart.HasTitle = True\n                ch.Chart.ChartTitle.Text = "{safe_title}"' if chart_title else ""
 
         vba = textwrap.dedent(f"""\
             Sub CreatePivotChart()
@@ -205,7 +219,7 @@ class VBALayer:
                 {dest_line}
 
                 Dim pt As PivotTable
-                Set pt = ws.PivotTables("{pivot_table_name}")
+                Set pt = ws.PivotTables("{safe_pivot}")
 
                 Dim ch As ChartObject
                 Set ch = ws.ChartObjects.Add( _
@@ -235,8 +249,9 @@ class VBALayer:
         """Generate VBA to add row/column/filter fields."""
         lines = []
         for f in fields:
+            safe_f = f.replace('"', '""')
             lines.append(
-                f'With pt.PivotFields("{f}")\n'
+                f'With pt.PivotFields("{safe_f}")\n'
                 f'    .Orientation = {orientation}\n'
                 f'End With'
             )
@@ -247,9 +262,9 @@ class VBALayer:
         """Generate VBA to add value fields with functions and number formats."""
         lines = []
         for vf in value_fields:
-            name = vf["name"]
+            name = vf["name"].replace('"', '""')
             func = vf.get("function", "xlSum")
-            nf = vf.get("number_format", "")
+            nf = vf.get("number_format", "").replace('"', '""')
             block = (
                 f'With pt.PivotFields("{name}")\n'
                 f'    .Orientation = xlDataField\n'

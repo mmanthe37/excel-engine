@@ -115,7 +115,7 @@ class AppleScriptLayer:
 
         key_parts = []
         for i, key in enumerate(keys, 1):
-            key_range = key["range"]
+            key_range = self._escape(key["range"])
             order = key.get("order", "ascending")
             order_enum = (
                 "sort ascending" if order == "ascending" else "sort descending"
@@ -123,7 +123,7 @@ class AppleScriptLayer:
             key_parts.append(f"key{i} range \"{key_range}\" order{i} {order_enum}")
 
         keys_str = " ".join(key_parts)
-        cmd = f'sort range "{range_str}" of active sheet {keys_str} header header yes'
+        cmd = f'sort range "{self._escape(range_str)}" of active sheet {keys_str} header header yes'
         self._tell_excel(cmd)
         logger.info("Sorted %s with %d keys", range_str, len(keys))
 
@@ -170,7 +170,7 @@ class AppleScriptLayer:
         if sheet:
             self.activate_sheet(sheet)
         self._tell_excel(
-            f'select range "{cell}" of active sheet\n'
+            f'select range "{self._escape(cell)}" of active sheet\n'
             f'set freeze panes of active window to true'
         )
         logger.info("Freeze panes at %s", cell)
@@ -212,22 +212,23 @@ class AppleScriptLayer:
         height: Optional[float] = None,
     ) -> None:
         """Position a shape (slicer, chart, etc.) on the active sheet."""
+        safe_name = self._escape(shape_name)
         commands = []
         if left is not None:
             commands.append(
-                f'set left position of shape "{shape_name}" of active sheet to {left}'
+                f'set left position of shape "{safe_name}" of active sheet to {left}'
             )
         if top is not None:
             commands.append(
-                f'set top of shape "{shape_name}" of active sheet to {top}'
+                f'set top of shape "{safe_name}" of active sheet to {top}'
             )
         if width is not None:
             commands.append(
-                f'set width of shape "{shape_name}" of active sheet to {width}'
+                f'set width of shape "{safe_name}" of active sheet to {width}'
             )
         if height is not None:
             commands.append(
-                f'set height of shape "{shape_name}" of active sheet to {height}'
+                f'set height of shape "{safe_name}" of active sheet to {height}'
             )
         if commands:
             self._tell_excel("\n".join(commands))
@@ -258,13 +259,13 @@ class AppleScriptLayer:
         """Select a range."""
         if sheet:
             self.activate_sheet(sheet)
-        self._tell_excel(f'select range "{range_str}" of active sheet')
+        self._tell_excel(f'select range "{self._escape(range_str)}" of active sheet')
 
     def go_to_cell(self, cell: str, sheet: Optional[str] = None) -> None:
         """Navigate to a specific cell."""
         if sheet:
             self.activate_sheet(sheet)
-        self._tell_excel(f'select range "{cell}" of active sheet')
+        self._tell_excel(f'select range "{self._escape(cell)}" of active sheet')
 
     # ── Miscellaneous ──
 

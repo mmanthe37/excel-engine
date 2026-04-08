@@ -311,7 +311,7 @@ class SystemEventsLayer:
         if data_range:
             MacUtils.run_applescript(
                 f'tell application "Microsoft Excel"\n'
-                f'    select range "{data_range}" of active sheet\n'
+                f'    select range "{self._escape(data_range)}" of active sheet\n'
                 f'end tell'
             )
             time.sleep(self.delay)
@@ -371,7 +371,7 @@ class SystemEventsLayer:
         # First select the location cell(s)
         MacUtils.run_applescript(
             f'tell application "Microsoft Excel"\n'
-            f'    select range "{location_range}" of active sheet\n'
+            f'    select range "{self._escape(location_range)}" of active sheet\n'
             f'end tell'
         )
         time.sleep(self.delay)
@@ -396,13 +396,13 @@ class SystemEventsLayer:
             f'        -- Click sparkline type button in Sparklines group\n'
             f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
             f'            tell group "Sparklines"\n'
-            f'                click button "{button_name}"\n'
+            f'                click button "{self._escape(button_name)}"\n'
             f'            end tell\n'
             f'        end tell\n'
             f'        delay 1.5\n'
             f'        -- The Create Sparklines dialog opens; set data range\n'
             f'        tell window 1\n'
-            f'            set value of text field 1 to "{data_range}"\n'
+            f'            set value of text field 1 to "{self._escape(data_range)}"\n'
             f'            delay {self.delay}\n'
             f'            click button "OK"\n'
             f'        end tell\n'
@@ -438,7 +438,7 @@ class SystemEventsLayer:
             f'        -- Look for the style in the gallery\n'
             f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
             f'            tell group "Table Styles"\n'
-            f'                click button "{style_name}"\n'
+            f'                click button "{self._escape(style_name)}"\n'
             f'            end tell\n'
             f'        end tell\n'
             f'    end tell\n'
@@ -490,12 +490,12 @@ class SystemEventsLayer:
             f'        set frontmost to true\n'
             f'        delay {self.delay}\n'
             f'        tell tab group 1 of group 1 of tool bar 1 of window 1\n'
-            f'            click radio button "{tab}"\n'
+            f'            click radio button "{self._escape(tab)}"\n'
             f'        end tell\n'
             f'        delay {self.delay * 2}\n'
             f'        tell scroll area 1 of group 1 of tool bar 1 of window 1\n'
-            f'            tell group "{group}"\n'
-            f'                click button "{button}"\n'
+            f'            tell group "{self._escape(group)}"\n'
+            f'                click button "{self._escape(button)}"\n'
             f'            end tell\n'
             f'        end tell\n'
             f'    end tell\n'

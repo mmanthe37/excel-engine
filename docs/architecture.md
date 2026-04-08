@@ -84,13 +84,14 @@ The engine determines which layers are applicable for each checkpoint type:
 ## Error Handling
 
 - **LayerExhaustionError** — All 6 layers failed. The checkpoint is logged as failed and the engine can optionally continue or abort.
-- **WorkbookCorruptionError** — A layer corrupted the workbook. The engine restores from the last known-good state (automatic backup before each section).
+- **WorkbookCorruptionError** — A layer corrupted the workbook. The engine logs the failure and can optionally continue or abort.
 - **ExcelNotRunningError** — Excel is not open or has crashed. The engine attempts to relaunch and reopen the workbook.
+- **Error Recovery** — Errors are classified by type and severity, with configurable retry counts and exponential backoff between attempts.
 
 ## State Management
 
-The engine maintains state across checkpoints:
+The engine maintains state across tasks:
 
-- **Workbook backups** — Created before each section for rollback.
 - **Execution log** — Every layer attempt is logged with timing, result, and error details.
-- **Checkpoint status** — Tracks which checkpoints are completed, failed, or pending.
+- **Task status** — Tracks which tasks are completed, failed, or pending.
+- **Verification results** — Per-section pass/fail tracking with detailed messages.

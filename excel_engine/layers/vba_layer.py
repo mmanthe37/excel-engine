@@ -90,6 +90,8 @@ class VBALayer:
             '    key code 96\n'  # F5 = key code 96
             'end tell'
         )
+        # TODO: Replace fixed 45s sleep with polling-based VBA completion detection
+        # e.g., check for a sentinel cell value that VBA sets when done
         time.sleep(self.execution_timeout)
 
         # Close VBE: Option + F11

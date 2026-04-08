@@ -4,7 +4,6 @@ Configuration, constants, and enums for the Excel Engine.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from pathlib import Path
@@ -173,6 +172,8 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],
     TaskType.SAVE_AS:             [Layer.APPLESCRIPT],
 }
+# Note: Layer.PYAUTOGUI is available as a last-resort fallback but no TaskTypes
+# map to it by default. It can be added to layer_order for pixel-level automation.
 
 
 @dataclass

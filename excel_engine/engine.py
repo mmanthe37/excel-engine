@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from excel_engine.config import EngineConfig, TaskType, Layer, TASK_LAYER_MAP
+from excel_engine.config import EngineConfig, TaskType, Layer
 from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError
 from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
 from excel_engine.layers.xlwings_layer import XlwingsLayer
@@ -107,6 +107,8 @@ class ExcelEngine:
             execution_timeout=self.config.vba_execution_timeout,
             split_threshold=self.config.vba_split_threshold,
         )
+        # Note: Layer.PYAUTOGUI is available as a last-resort fallback but no TaskTypes
+        # map to it by default. It can be added to layer_order for pixel-level automation.
         self._pyautogui = PyAutoGUILayer(retina=self.config.retina_display)
 
         # Initialize components

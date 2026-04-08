@@ -16,12 +16,9 @@ KEY RULES:
 from __future__ import annotations
 
 import logging
-import subprocess
-from pathlib import Path
 from typing import Optional
 
 from excel_engine.utils.mac_utils import MacUtils
-from excel_engine.utils.excel_constants import ExcelConstants
 
 logger = logging.getLogger(__name__)
 

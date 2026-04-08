@@ -34,8 +34,6 @@ from openpyxl.styles import (
     Font,
     PatternFill,
     Side,
-    NamedStyle,
-    numbers,
 )
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation

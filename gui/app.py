@@ -49,31 +49,37 @@ with st.sidebar:
 
     phase = st.radio(
         "Execution Mode",
-        ["Offline (openpyxl)", "Full (all layers — macOS only)"],
+        ["Standard Mode (works everywhere)", "Advanced Mode (Mac only — uses Excel app)"],
         index=0,
     )
-    dry_run = st.checkbox("Dry Run (plan only, don't modify)", value=False)
-    max_retries = st.slider("Max Retries", 0, 5, 2)
-    verify = st.checkbox("Verify after each section", value=True)
+    dry_run = st.checkbox("Preview Only (show plan without making changes)", value=False)
+    max_retries = st.slider("Retry attempts if something fails", 0, 5, 3)
+    verify = st.checkbox("Double-check results after each step", value=True)
 
     st.divider()
-    st.header("ℹ️ Engine Info")
-    st.write(f"**Version:** {__version__}")
+    with st.expander("ℹ️ Engine Info", expanded=False):
+        st.write(f"**Version:** {__version__}")
 
-    available_layers = [l.name for l in Layer]
-    if phase == "Offline (openpyxl)":
-        st.write("**Active layers:** OPENPYXL")
-    else:
-        st.write(f"**Active layers:** {', '.join(available_layers)}")
+        available_layers = [l.name for l in Layer]
+        if phase == "Standard Mode (works everywhere)":
+            st.write("**Active layers:** OPENPYXL")
+        else:
+            st.write(f"**Active layers:** {', '.join(available_layers)}")
 
-    with st.expander("All layers"):
-        for layer in Layer:
-            st.write(f"Layer {layer.value}: {layer.name}")
+        with st.expander("All layers"):
+            for layer in Layer:
+                st.write(f"Layer {layer.value}: {layer.name}")
 
 # ────────────────────────────────────────────────────────────────
 # Main area — file upload
 # ────────────────────────────────────────────────────────────────
-col1, col2 = st.columns(2)
+st.info(
+    "👋 **How it works:** Upload your Excel file on the left, then provide your "
+    "assignment instructions on the right (upload a file or paste the text). "
+    "Click **Run Excel Engine** when ready!"
+)
+
+col1, col2 = st.columns(2, gap="large")
 
 with col1:
     st.subheader("📁 Excel Workbook")
@@ -82,9 +88,17 @@ with col1:
 with col2:
     st.subheader("📝 Instructions")
     instruction_file = st.file_uploader(
-        "Upload instructions", type=["txt", "docx", "pdf", "rtfd"]
+        "Upload instructions",
+        type=["txt", "docx", "pdf", "rtf"],
+        help="RTFD (macOS bundle) cannot be uploaded — paste the text instead, "
+        "or export to PDF/DOCX first.",
     )
-    instruction_text = st.text_area("Or paste instructions here", height=150)
+    instruction_text = st.text_area(
+        "Or paste instructions here",
+        height=150,
+        help="Example: 'In cell B2, enter the formula =SUM(A1:A10). "
+        "Format column C as currency. Add a header row with bold text.'",
+    )
 
 
 # ────────────────────────────────────────────────────────────────
@@ -122,7 +136,7 @@ def _show_result(result: EngineResult) -> None:
                 for vr in sv.results:
                     color = "green" if vr.passed else "red"
                     st.markdown(
-                        f"&nbsp;&nbsp;&nbsp;:{color}[{'✓' if vr.passed else '✗'}] "
+                        f"&nbsp;&nbsp;&nbsp;:{color}[{'PASS ✓' if vr.passed else 'FAIL ✗'}] "
                         f"`{vr.task_id}` ({vr.task_type.value}) — {vr.message}"
                     )
 
@@ -169,7 +183,7 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
             config = EngineConfig()
             config.max_retries = max_retries
             config.verify_after_each_section = verify
-            if phase == "Offline (openpyxl)":
+            if phase == "Standard Mode (works everywhere)":
                 config.layer_order = [Layer.OPENPYXL]
 
             engine = ExcelEngine(config)
@@ -193,7 +207,9 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
 
                 st.session_state.result = result
                 st.session_state.processed_bytes = wb_path.read_bytes()
-                st.session_state.processed_name = f"processed_{workbook_file.name}"
+                st.session_state.processed_name = (
+                    f"{workbook_file.name.rsplit('.', 1)[0]}_completed.xlsx"
+                )
 
             # ── File-based path: scan → plan → execute ──
             else:
@@ -205,6 +221,15 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
                     status_text.text("📖 Scanning instructions...")
                     progress_bar.progress(10)
                     tasks = engine.scan(instr_path)
+
+                    if len(tasks) == 0:
+                        progress_bar.progress(100)
+                        status_text.text("")
+                        st.warning(
+                            "⚠️ No tasks found in your instructions. "
+                            "Check that your file contains specific Excel tasks."
+                        )
+                        st.stop()
 
                     # Step 2: Plan
                     status_text.text(f"📋 Planning {len(tasks)} tasks...")
@@ -251,12 +276,27 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
                         st.session_state.result = result
                         st.session_state.processed_bytes = wb_path.read_bytes()
                         st.session_state.processed_name = (
-                            f"processed_{workbook_file.name}"
+                            f"{workbook_file.name.rsplit('.', 1)[0]}_completed.xlsx"
                         )
 
         except Exception as exc:
-            st.error(f"❌ Error: {exc}")
-            with st.expander("Error Details"):
+            exc_str = str(exc).lower()
+            if ".xls" in exc_str and "xlsx" not in exc_str or "invalid file" in exc_str:
+                st.error(
+                    "❌ This file uses an older format. "
+                    "Please re-save it as **.xlsx** in Excel and try again."
+                )
+            elif "permission" in exc_str or "locked" in exc_str:
+                st.error(
+                    "❌ The file appears to be locked. "
+                    "Close it in Excel and try again."
+                )
+            else:
+                st.error(
+                    "❌ Something went wrong. "
+                    "Please check your files and try again."
+                )
+            with st.expander("🔧 Technical Details"):
                 st.code(traceback.format_exc())
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
@@ -279,10 +319,17 @@ if st.session_state.processed_bytes is not None:
         use_container_width=True,
     )
 
+if st.session_state.result is not None or st.session_state.processed_bytes is not None:
+    if st.button("🔄 Start Over", type="secondary"):
+        for key in ["processed_bytes", "processed_name", "result"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
 # ────────────────────────────────────────────────────────────────
 # Footer
 # ────────────────────────────────────────────────────────────────
 st.divider()
+st.caption("💡 Tip: Use Tab to navigate between fields, Enter to activate buttons.")
 st.caption(
     f"Excel Engine v{__version__} · Works on macOS, Windows & Linux · "
     "[GitHub](https://github.com/mmanthe37/excel-engine)"

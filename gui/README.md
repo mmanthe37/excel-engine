@@ -47,7 +47,7 @@ The app needs Python to run. Download it free from [python.org/downloads](https:
 - **Linux:** You may need to make it executable: right-click → Properties → Permissions → "Allow executing"
 
 ### Something went wrong during execution
-- Try switching to "Offline (openpyxl)" mode in the sidebar
+- Try switching to "Standard Mode (works everywhere)" in the sidebar
 - Make sure your Excel file is a `.xlsx` file (not `.xls` or `.csv`)
 - Check that your instruction file clearly describes what to do
 

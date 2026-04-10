@@ -2,14 +2,14 @@
 
 # Excel Engine
 
-### Autonomous Excel Automation for macOS
+### Autonomous Excel Automation — Cross-Platform GUI + macOS Desktop Engine
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/badge/PyPI-coming%20soon-orange)](https://github.com/mmanthe37/excel-engine)
 
-**A 6-layer desktop automation engine that completes Microsoft Excel assignments autonomously on macOS.**
+**A 6-layer desktop automation engine that completes Microsoft Excel assignments autonomously. Cross-platform GUI for all platforms; full desktop automation on macOS.**
 
 [Quick Start](#quick-start) · [Architecture](#architecture) · [Usage](#usage) · [Distribution Formats](#distribution-formats) · [Contributing](CONTRIBUTING.md)
 
@@ -24,8 +24,9 @@
 - **114+ Task Patterns** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
 - **Self-Healing Execution** — Automatic retry with layer escalation when a step fails
 - **Error Recovery** — Classified error handling with configurable retry and exponential backoff
-- **5 Distribution Formats** — Use as a Python library, CLI tool, MCP Server (recommended AI interface), Copilot CLI Extension *(deprecated — use MCP Server)*, or Copilot Plugin
-- **macOS-Native** — Built specifically for Microsoft Excel for Mac 365 using AppleScript, System Events, and Accessibility APIs
+- **6 Distribution Formats** — Use as a Python library, CLI tool, GUI App, MCP Server (recommended AI interface), Copilot CLI Extension *(deprecated — use MCP Server)*, or Copilot Plugin
+- **Cross-Platform GUI** — Browser-based GUI works on macOS, Windows, and Linux — no terminal needed
+- **macOS-Native Desktop Layers** — Layers 2–6 use AppleScript, System Events, and Accessibility APIs (macOS only); Layer 1 (openpyxl) works everywhere
 
 ## Quick Start
 
@@ -121,9 +122,37 @@ python mcp-server/server.py
 # See mcp-server/README.md for setup instructions.
 ```
 
+### GUI App (Easiest — No Terminal Needed)
+
+The GUI app works on **macOS, Windows, and Linux**. No coding or terminal experience required.
+
+1. Download the project: [Download ZIP](https://github.com/mmanthe37/excel-engine/archive/refs/heads/main.zip)
+2. Unzip the folder
+3. Double-click the launcher for your platform:
+   - **macOS:** `gui/launch.command`
+   - **Windows:** `gui/launch.bat`
+   - **Linux:** `gui/launch.sh`
+
+The app opens in your browser. Upload your Excel file + instructions, click Run, and download the result.
+
+> See [`gui/README.md`](gui/README.md) for the full user guide.
+
 ### Copilot Plugin
 
 See [`plugin/README.md`](plugin/README.md) for setup instructions.
+
+## Distribution Formats
+
+| # | Format | Description | Platform | How to Use |
+|---|--------|-------------|----------|------------|
+| 1 | Python Library | Import and use in your own scripts | All | `pip install -e .` → `from excel_engine import ExcelEngine` |
+| 2 | CLI Tool | Command-line interface | All | `excel-engine run assignment.xlsx instructions.docx` |
+| 3 | GUI App | Cross-platform browser GUI | macOS, Windows, Linux | Double-click launcher → browser UI |
+| 4 | MCP Server | AI assistant integration (recommended) | All | `python mcp-server/server.py` |
+| 5 | Copilot CLI Extension | *(Deprecated — use MCP Server)* | macOS | See `extensions/README.md` |
+| 6 | Copilot Plugin | GitHub Copilot Chat integration | All | See `plugin/README.md` |
+
+> **Note:** Layers 2–6 of the automation engine (xlwings, AppleScript, System Events, VBA, PyAutoGUI) are macOS-only. The GUI and CLI use Layer 1 (openpyxl) on all platforms.
 
 ## Usage
 
@@ -315,6 +344,14 @@ excel-engine/
 │   └── skills/
 │       ├── excel-automation/
 │       └── instruction-parsing/
+├── gui/                        # Cross-platform GUI app
+│   ├── README.md               # Non-technical user guide
+│   ├── run_app.py              # Gradio/Streamlit GUI application
+│   ├── build_app.py            # Standalone app builder
+│   ├── BUILD.md                # Build instructions
+│   ├── launch.command           # macOS launcher (double-click)
+│   ├── launch.bat              # Windows launcher (double-click)
+│   └── launch.sh               # Linux launcher (double-click)
 ├── tests/                      # Test suite
 │   ├── conftest.py
 │   ├── test_engine.py

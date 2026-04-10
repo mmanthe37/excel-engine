@@ -108,6 +108,9 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?formula\b"),
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?function\b"),
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?\w+\s+function\b"),
+        _p(r"(?:enter|type|create|add|use)\s+(?:the\s+)?(?:a\s+)?\w+\s+formula\b"),  # P2-13: "enter a SUM formula"
+        _p(r"using\s+(?:the\s+)?\w+\s+function\b"),  # P0-3: "using the X function"
+        _p(r"\b(?:TODAY|NOW|DATE|YEAR|MONTH|HOUR|MINUTE|SECOND)\s+function\b"),  # P0-3: date/time function names
         _p(r"(?:in\s+cell\s+[A-Z]{1,3}\d{1,7}),?\s*(?:enter|type)\s+="),
         _p(r"=(?:SUM|AVERAGE|COUNT|COUNTA|COUNTIF|COUNTIFS|SUMIF|SUMIFS|AVERAGEIF|AVERAGEIFS)\s*\("),
         _p(r"=(?:IF|IFS|AND|OR|NOT|IFERROR|IFNA)\s*\("),
@@ -154,6 +157,7 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         # Conditional instruction patterns (if/when value conditions)
         _p(r"if\s+(?:the\s+)?value\s+in\s+cell\s+[A-Z]{1,3}\d{1,7}\s+is\s+(?:greater|less|equal|not)"),
         _p(r"when\s+(?:the\s+)?(?:total|value|sum|count)\s+(?:exceeds?|is\s+(?:greater|less|over|under))"),
+        _p(r"if\s+(?:the\s+)?(?:total|value|sum|number|count).+?format\s+(?:it\s+)?(?:in|as|with)\s+\w+"),  # P2-12: "if total exceeds 1000, format in red"
     ],
 
     # ── Number Format ──
@@ -170,6 +174,8 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:center|left|right)\s+align"),
         _p(r"(?:align|alignment)\s+(?:to\s+)?(?:center|left|right|top|bottom|middle)"),
         _p(r"wrap\s+text"),
+        _p(r"text\s+wrapp(?:ing)?\b"),  # P1-6: "text wrapping"
+        _p(r"(?:enable|disable|turn\s+on|turn\s+off)\s+(?:text\s+)?wrapp?(?:ing)?\b"),  # P1-6: "enable wrapping"
         _p(r"merge\s+(?:and\s+)?center"),
         _p(r"(?:horizontal|vertical)\s+(?:alignment|centering)"),
         _p(r"(?:indent|orientation|text\s+direction|shrink\s+to\s+fit)"),
@@ -185,11 +191,15 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"column\s+[A-Z]{1,3}\s+(?:to\s+)?(?:a\s+)?width\s+(?:of\s+)?\d+"),
         _p(r"(?:change|set|adjust)\s+(?:the\s+)?width\s+of\s+(?:the\s+)?column"),
         _p(r"width\s+of\s+column\s+[A-Z]{1,3}\s+to\s+\d+"),
+        _p(r"(?:hide|unhide|show)\s+(?:the\s+)?columns?\b"),  # P0-1: hide/unhide columns
+        _p(r"auto\s*fit\s+(?:all\s+)?(?:the\s+)?columns?\b"),  # P0-5: "autofit all columns"
+        _p(r"auto\s*fit\b"),  # P0-5: bare "autofit"
     ],
     TaskType.ROW_HEIGHT: [
         _p(r"(?:change|set|adjust|resize)\s+(?:the\s+)?row\s+height"),
         _p(r"autofit\s+(?:row|height)"),
         _p(r"row\s+height\s+(?:to\s+)?\d+"),
+        _p(r"(?:hide|unhide|show)\s+(?:the\s+)?rows?\b"),  # P0-1: hide/unhide rows
     ],
 
     # ── View & Layout ──
@@ -209,6 +219,7 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
     TaskType.AUTOFILTER: [
         _p(r"auto\s*filter"),
         _p(r"(?:apply|add|enable|turn\s+on)\s+(?:a\s+)?filter(?:s|\b)"),
+        _p(r"filter\s+(?:the\s+)?(?:data|range|table|records?)\b"),  # P0-4: "filter the data"
     ],
     TaskType.ADVANCED_FILTER: [
         _p(r"advanced\s+filter"),
@@ -232,6 +243,7 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:restrict|limit|validate)\s+(?:the\s+)?(?:input|entry|data|values?)"),
         _p(r"input\s+message"),
         _p(r"error\s+alert"),
+        _p(r"(?:remove|delete|eliminate)\s+(?:the\s+)?duplicates?\b"),  # P1-7: "remove duplicates"
     ],
     TaskType.GOAL_SEEK: [
         _p(r"goal\s+seek"),
@@ -244,29 +256,36 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:bar|column)\s+chart"),
         _p(r"(?:clustered|stacked|100%?\s+stacked)\s+(?:bar|column)"),
         _p(r"(?:2-?D|3-?D)\s+(?:bar|column)\s+chart"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?(?:bar|column)\b"),  # P2-11
+        _p(r"(?:add|change|format|remove)\s+(?:a\s+)?(?:chart\s+)?(?:title|trendline|data\s+labels?|legend|axis)"),  # P1-8: chart modifications
     ],
     TaskType.CHART_LINE: [
         _p(r"(?:create|insert|add)\s+(?:a\s+)?line\s+chart"),
         _p(r"(?:line\s+with\s+markers?|stacked\s+line)"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?line\b"),  # P2-11
     ],
     TaskType.CHART_PIE: [
         _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:pie|doughnut)\s+chart"),
         _p(r"(?:3-?D\s+pie|exploded\s+pie|pie\s+of\s+pie)"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?(?:pie|doughnut)\b"),  # P2-11
     ],
     TaskType.CHART_SCATTER: [
         _p(r"(?:create|insert|add)\s+(?:a\s+)?(?:scatter|XY)\s+chart"),
         _p(r"(?:scatter|XY)\s+(?:chart|plot|with\s+)"),
         _p(r"(?:scatter\s+with\s+)?(?:smooth\s+lines?|straight\s+lines?)"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?(?:scatter|XY)\b"),  # P2-11
     ],
     TaskType.CHART_AREA: [
         _p(r"(?:create|insert|add)\s+(?:a\s+|an\s+)?area\s+chart"),
         _p(r"(?:stacked\s+area|100%?\s+stacked\s+area)"),
         _p(r"area\s+chart"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+|an\s+)?area\b"),  # P2-11
     ],
     TaskType.CHART_COMBO: [
         _p(r"combo\s+chart"),
         _p(r"(?:combination|mixed)\s+chart"),
         _p(r"secondary\s+(?:axis|y-?axis)"),
+        _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?combo\b"),  # P2-11
     ],
     TaskType.CHART_HISTOGRAM: [
         _p(r"histogram"),
@@ -326,8 +345,11 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
     TaskType.FONT: [
         _p(r"(?:change|set|apply)\s+(?:the\s+)?font"),
         _p(r"(?:make|format)\s+(?:the\s+)?(?:text|cell|range|selection)\s+(?:bold|italic|underline)"),
+        _p(r"(?:format|make)\s+.*?\bas\s+(?:bold|italic|underline)\b"),  # P0-2: "format X as bold"
+        _p(r"\bas\s+(?:bold|italic|underline|strikethrough)\b"),  # P0-2: bare "as bold"
         _p(r"font\s+(?:size|color|colour|name|face)"),
         _p(r"\b(?:bold|italic|underline|strikethrough)\s+(?:the|to)\b"),
+        _p(r"(?:apply|use)\s+(?:the\s+)?[\w\s]+?\s+style\s+(?:to|for)\b"),  # P1-10: cell style names
     ],
     TaskType.FILL: [
         _p(r"(?:fill|background|cell)\s+colo[u]?r"),
@@ -354,9 +376,10 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
     TaskType.PRINT_SETTINGS: [
         _p(r"(?:set|change|adjust)\s+(?:the\s+)?(?:print|page)\s+(?:area|orientation|margins?|header|footer|setup|layout|scaling|title)"),
         _p(r"(?:landscape|portrait)\s+orientation"),
-        _p(r"(?:header|footer)\s+(?:and\s+)?(?:row|column)"),
+        _p(r"(?:print\s+)?(?:page\s+)?(?:header|footer)\s+(?:and\s+)?(?:header|footer)"),  # P1-9: fixed false positive
         _p(r"(?:print\s+titles?|repeat\s+(?:rows?|columns?)\s+(?:at|on))"),
         _p(r"(?:fit\s+to|scale\s+to)\s+(?:\d+\s+)?page"),
+        _p(r"(?:add|insert|create)\s+(?:a\s+)?(?:header|footer)s?\b"),  # P1-9: headers/footers for printing
     ],
 }
 
@@ -408,7 +431,7 @@ _FORMULA_REF = re.compile(
     r"(?:"
     r"[A-Z]+\([^)]*(?:\([^)]*\)[^)]*)*\)"  # =FUNC(... possibly nested ...)
     r"|"
-    r"[A-Z]{1,3}\d+\s*[+\-*/].+"            # =A1+B1*C1
+    r"[A-Z]{1,3}\d+\s*[+\-*/].+?(?=\s+(?:in|into|on|then|and|for)\b|\s*[,;]|$)"  # =A1+B1*C1
     r"|"
     r"[A-Z]+\(.+?\)"                          # =FUNC(simple args)
     r")"
@@ -488,10 +511,19 @@ class TaskExtractor:
 
     def _split_instructions(self, text: str) -> list[str]:
         """Split instruction text into individual instruction lines."""
+        # Pre-strip section header lines so they don't merge with steps
+        text = re.sub(
+            r"\n\s*(Section\s+\d+[:.][^\n]*)",
+            r"\n\n\1",
+            text,
+            flags=re.I,
+        )
+
         # Try numbered steps first:  1. / Step 1: / a. / a) / • / -
         numbered = re.split(
-            r"\n\s*(?:\d+[.)]\s+|Step\s+\d+[:.]\s+|[a-z][.)]\s+|[•●]\s+|-\s+)",
+            r"\n\s*(?:\d+[.)]\s+|Step\s+\d+[:.]\s+|Section\s+\d+[:.]\s*|[a-z][.)]\s+|[•●]\s+|-\s+)",
             text,
+            flags=re.I,
         )
         if len(numbered) > 2:
             return [s.strip() for s in numbered if s.strip()]
@@ -501,7 +533,7 @@ class TaskExtractor:
         result = []
         for p in paragraphs:
             p = p.strip()
-            if p and len(p) > 10:
+            if p and len(p) > 4:
                 result.append(p)
         return result
 
@@ -528,6 +560,20 @@ class TaskExtractor:
                 task.formula = formula_match.group(1)
                 tasks.append(task)
 
+        # Suppress spurious CELL_VALUE when a formula-type task already exists
+        _FORMULA_TYPES = {
+            TaskType.FORMULA,
+            TaskType.LOOKUP_FUNCTION,
+            TaskType.FILTER_FUNCTION,
+            TaskType.SORT_FUNCTION,
+            TaskType.UNIQUE_FUNCTION,
+            TaskType.TEXT_FUNCTION,
+            TaskType.THREE_D_REFERENCE,
+        }
+        has_formula_task = any(t.task_type in _FORMULA_TYPES for t in tasks)
+        if has_formula_task:
+            tasks = [t for t in tasks if t.task_type != TaskType.CELL_VALUE]
+
         return tasks
 
     def _build_task(self, task_type: TaskType, line: str) -> Task:
@@ -546,6 +592,13 @@ class TaskExtractor:
                 (g.strip() for g in sheet_match.groups() if g), None
             )
 
+        # ── Extract target cell from "in cell X" / "into cell X" phrasing ──
+        target_match = re.search(
+            r"(?:in|into)\s+(?:the\s+)?(?:cell\s+)?([A-Z]{1,3}\d{1,7})\b",
+            line,
+            re.I,
+        )
+
         # ── Extract cell / range reference ──
         range_match = _RANGE_REF.search(line)
         if range_match:
@@ -554,6 +607,11 @@ class TaskExtractor:
             cell_match = _CELL_REF.search(line)
             if cell_match:
                 task.cell = cell_match.group(1)
+
+        # If a target cell was explicitly stated, prefer it over the range-
+        # derived fallback (which may have come from inside a formula).
+        if target_match:
+            task.cell = target_match.group(1).upper()
 
         # ── Extract formula ──
         formula_match = _FORMULA_REF.search(line)
@@ -575,6 +633,15 @@ class TaskExtractor:
         val_match = _VALUE_REF.search(line)
         if val_match:
             task.value = val_match.group(1)
+
+        # ── Extract bare numeric value for CELL_VALUE tasks ──  (P2-14)
+        if task_type == TaskType.CELL_VALUE and not task.value:
+            bare_num = re.search(
+                r"(?:enter|type|input|put)\s+(?:the\s+)?(?:number\s+)?(\d[\d,.]*)",
+                line, re.I,
+            )
+            if bare_num:
+                task.value = bare_num.group(1)
 
         return task
 

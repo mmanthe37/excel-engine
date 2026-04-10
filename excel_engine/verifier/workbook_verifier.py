@@ -299,7 +299,12 @@ class WorkbookVerifier:
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=True, message=f"Cell has value: {cell_value}",
+            passed=True,
+            message=(
+                f"No expected value specified — cannot verify correctness (cell has: {cell_value})"
+                if task.formula is None
+                else f"Cell has value: {cell_value}"
+            ),
         )
 
     def _verify_external_reference(self, task: Task) -> VerificationResult:

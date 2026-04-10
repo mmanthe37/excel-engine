@@ -205,6 +205,10 @@ class OpenpyxlLayer:
             name=name, size=size, bold=bold, italic=italic,
             color=color, underline=underline,
         )
+        # Single cell reference returns a Cell, not a tuple of rows
+        if ":" not in cells:
+            ws[cells].font = font
+            return
         for row in ws[cells]:
             if not isinstance(row, tuple):
                 row = (row,)
@@ -218,6 +222,9 @@ class OpenpyxlLayer:
         """Apply a background fill to a range."""
         ws = self._ws(sheet)
         fill = PatternFill(start_color=color, end_color=color, fill_type=fill_type)
+        if ":" not in cells:
+            ws[cells].fill = fill
+            return
         for row in ws[cells]:
             if not isinstance(row, tuple):
                 row = (row,)
@@ -239,6 +246,9 @@ class OpenpyxlLayer:
             horizontal=horizontal, vertical=vertical,
             wrap_text=wrap_text, indent=indent,
         )
+        if ":" not in cells:
+            ws[cells].alignment = alignment
+            return
         for row in ws[cells]:
             if not isinstance(row, tuple):
                 row = (row,)
@@ -250,6 +260,9 @@ class OpenpyxlLayer:
     ) -> None:
         """Apply a number format to a range. Use codes from ExcelConstants.NUMBER_FORMATS."""
         ws = self._ws(sheet)
+        if ":" not in cells:
+            ws[cells].number_format = fmt
+            return
         for row in ws[cells]:
             if not isinstance(row, tuple):
                 row = (row,)
@@ -267,6 +280,9 @@ class OpenpyxlLayer:
         ws = self._ws(sheet)
         side = Side(style=style, color=color)
         border = Border(left=side, right=side, top=side, bottom=side)
+        if ":" not in cells:
+            ws[cells].border = border
+            return
         for row in ws[cells]:
             if not isinstance(row, tuple):
                 row = (row,)

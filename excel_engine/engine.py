@@ -412,7 +412,7 @@ class ExcelEngine:
                 self._openpyxl.set_formula(task.cell, task.formula, sheet=task.sheet)
 
         elif tt == TaskType.CELL_VALUE:
-            if task.cell and task.value:
+            if task.cell and task.value is not None:
                 self._openpyxl.set_value(task.cell, task.value, sheet=task.sheet)
 
         elif tt == TaskType.TABLE_CREATE:
@@ -464,7 +464,13 @@ class ExcelEngine:
                 )
 
         elif tt == TaskType.COLUMN_WIDTH:
-            col = task.params.get("column", "A")
+            col = task.params.get("column")
+            if not col and task.cell:
+                # Extract column letter from cell reference (e.g. "B1" → "B")
+                import re
+                m = re.match(r"([A-Za-z]+)", task.cell)
+                col = m.group(1).upper() if m else "A"
+            col = col or "A"
             width = task.params.get("width", 12)
             self._openpyxl.set_column_width(col, width, sheet=task.sheet)
 
@@ -542,10 +548,14 @@ class ExcelEngine:
 
         elif tt == TaskType.DATA_VALIDATION:
             ref = task.range or task.cell or "A1"
+            formula1 = task.params.get("formula1")
+            # Convert a "values" list to the comma-separated formula1 format
+            if not formula1 and "values" in task.params:
+                formula1 = '"' + ",".join(str(v) for v in task.params["values"]) + '"'
             self._openpyxl.add_data_validation(
                 ref, sheet=task.sheet,
                 validation_type=task.params.get("type", "list"),
-                formula1=task.params.get("formula1"),
+                formula1=formula1,
             )
 
         elif tt == TaskType.FREEZE_PANES:

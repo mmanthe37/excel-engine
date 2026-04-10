@@ -103,7 +103,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.FORMULA:             [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
     TaskType.CELL_VALUE:          [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
     TaskType.TEXT_FUNCTION:       [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.LOOKUP_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # XLOOKUP needs live eval
+    TaskType.LOOKUP_FUNCTION:     [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],    # openpyxl can write the formula text
     TaskType.FILTER_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
     TaskType.SORT_FUNCTION:       [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
     TaskType.UNIQUE_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
@@ -166,7 +166,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.SHEET_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_RENAME:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_MOVE:          [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.SHEET_COPY:          [Layer.APPLESCRIPT, Layer.XLWINGS],    # AppleScript 'duplicate' cmd
+    TaskType.SHEET_COPY:          [Layer.OPENPYXL, Layer.APPLESCRIPT, Layer.XLWINGS],    # openpyxl can copy_worksheet
 
     # ── File Operations ──
     TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],
@@ -226,4 +226,6 @@ class EngineConfig:
     def get_layers_for_task(self, task_type: TaskType) -> list[Layer]:
         """Return the ordered list of layers that can handle a given task type."""
         candidates = TASK_LAYER_MAP.get(task_type, [])
-        return sorted(candidates, key=lambda l: self.layer_order.index(l))
+        # Only consider layers present in layer_order to avoid ValueError
+        available = [l for l in candidates if l in self.layer_order]
+        return sorted(available, key=lambda l: self.layer_order.index(l))

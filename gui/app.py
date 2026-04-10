@@ -83,7 +83,11 @@ col1, col2 = st.columns(2, gap="large")
 
 with col1:
     st.subheader("📁 Excel Workbook")
-    workbook_file = st.file_uploader("Upload your .xlsx file", type=["xlsx", "xls"])
+    workbook_file = st.file_uploader(
+        "Upload your .xlsx or .xlsm file",
+        type=["xlsx", "xlsm"],
+        help="Legacy .xls (BIFF) format is not supported — please convert to .xlsx first.",
+    )
 
 with col2:
     st.subheader("📝 Instructions")
@@ -162,6 +166,13 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
     elif not instruction_file and not instruction_text.strip():
         st.error("Please upload instructions or paste them above!")
     else:
+        # HIGH-3: Warn when both instruction sources are provided
+        if instruction_file and instruction_text.strip():
+            st.warning(
+                "⚠️ Both an instruction file and pasted text were provided. "
+                "The uploaded file will be used; pasted text is ignored."
+            )
+
         # Build a persistent working directory inside session_state so the
         # download button can read the bytes after the run block exits.
         import tempfile, shutil  # noqa: E401
@@ -188,96 +199,76 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
 
             engine = ExcelEngine(config)
 
-            # ── Text-only path (no file to scan) ──
-            if not instr_path and instruction_text.strip():
-                with st.spinner("Running Excel Engine..."):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+            # ── Unified scan → plan → (dry-run check) → execute path ──
+            with st.spinner("Running Excel Engine..."):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
 
-                    status_text.text("⚡ Running with pasted instructions...")
-                    progress_bar.progress(20)
+                # Step 1: Scan / extract tasks
+                status_text.text("📖 Scanning instructions...")
+                progress_bar.progress(10)
 
-                    result = engine.run(
-                        workbook=wb_path,
-                        instruction_text=instruction_text.strip(),
-                    )
-
-                    progress_bar.progress(100)
-                    status_text.text("✅ Complete!")
-
-                st.session_state.result = result
-                st.session_state.processed_bytes = wb_path.read_bytes()
-                st.session_state.processed_name = (
-                    f"{workbook_file.name.rsplit('.', 1)[0]}_completed.xlsx"
-                )
-
-            # ── File-based path: scan → plan → execute ──
-            else:
-                with st.spinner("Running Excel Engine..."):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
-                    # Step 1: Scan
-                    status_text.text("📖 Scanning instructions...")
-                    progress_bar.progress(10)
+                if instr_path:
                     tasks = engine.scan(instr_path)
+                else:
+                    tasks = engine.extractor.extract(instruction_text.strip())
 
-                    if len(tasks) == 0:
-                        progress_bar.progress(100)
-                        status_text.text("")
-                        st.warning(
-                            "⚠️ No tasks found in your instructions. "
-                            "Check that your file contains specific Excel tasks."
+                if len(tasks) == 0:
+                    progress_bar.progress(100)
+                    status_text.text("")
+                    st.warning(
+                        "⚠️ No tasks found in your instructions. "
+                        "Check that your file contains specific Excel tasks."
+                    )
+                    st.stop()
+
+                # Step 2: Plan
+                status_text.text(f"📋 Planning {len(tasks)} tasks...")
+                progress_bar.progress(25)
+                plan = engine.plan(tasks)
+
+                # Show plan
+                with st.expander(
+                    f"📋 Execution Plan — {plan.section_count} sections, "
+                    f"{plan.total_tasks} tasks",
+                    expanded=False,
+                ):
+                    for i, section in enumerate(plan.sections):
+                        st.write(
+                            f"**Section {i + 1}: {section.id}** "
+                            f"({section.name}) — {section.task_count} tasks"
                         )
-                        st.stop()
-
-                    # Step 2: Plan
-                    status_text.text(f"📋 Planning {len(tasks)} tasks...")
-                    progress_bar.progress(25)
-                    plan = engine.plan(tasks)
-
-                    # Show plan
-                    with st.expander(
-                        f"📋 Execution Plan — {plan.section_count} sections, "
-                        f"{plan.total_tasks} tasks",
-                        expanded=False,
-                    ):
-                        for i, section in enumerate(plan.sections):
+                        for task in section.tasks:
                             st.write(
-                                f"**Section {i + 1}: {section.id}** "
-                                f"({section.name}) — {section.task_count} tasks"
+                                f"&nbsp;&nbsp;- {task.task_type.value}: "
+                                f"{task.description}"
                             )
-                            for task in section.tasks:
-                                st.write(
-                                    f"&nbsp;&nbsp;- {task.task_type.value}: "
-                                    f"{task.description}"
-                                )
 
-                    if dry_run:
-                        status_text.text("✅ Dry run complete — no changes made")
-                        progress_bar.progress(100)
-                        st.success(
-                            f"Dry run: {plan.total_tasks} tasks planned across "
-                            f"{plan.section_count} sections"
-                        )
-                        st.session_state.result = None
-                        st.session_state.processed_bytes = None
-                    else:
-                        # Step 3: Execute
-                        status_text.text("⚡ Executing tasks...")
-                        progress_bar.progress(50)
-                        result = engine.execute(plan, wb_path)
-                        progress_bar.progress(90)
+                if dry_run:
+                    status_text.text("✅ Dry run complete — no changes made")
+                    progress_bar.progress(100)
+                    st.success(
+                        f"Dry run: {plan.total_tasks} tasks planned across "
+                        f"{plan.section_count} sections"
+                    )
+                    st.session_state.result = None
+                    st.session_state.processed_bytes = None
+                else:
+                    # Step 3: Execute
+                    status_text.text("⚡ Executing tasks...")
+                    progress_bar.progress(50)
+                    result = engine.execute(plan, wb_path)
+                    progress_bar.progress(90)
 
-                        # Step 4: Done
-                        status_text.text("✅ Complete!")
-                        progress_bar.progress(100)
+                    # Step 4: Done
+                    status_text.text("✅ Complete!")
+                    progress_bar.progress(100)
 
-                        st.session_state.result = result
-                        st.session_state.processed_bytes = wb_path.read_bytes()
-                        st.session_state.processed_name = (
-                            f"{workbook_file.name.rsplit('.', 1)[0]}_completed.xlsx"
-                        )
+                    st.session_state.result = result
+                    st.session_state.processed_bytes = wb_path.read_bytes()
+                    st.session_state.processed_name = (
+                        f"{workbook_file.name.rsplit('.', 1)[0]}_completed.xlsx"
+                    )
 
         except Exception as exc:
             exc_str = str(exc).lower()

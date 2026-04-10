@@ -108,7 +108,7 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?formula\b"),
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?function\b"),
         _p(r"(?:enter|type|input|create|add|use)\s+(?:the\s+)?(?:a\s+)?\w+\s+function\b"),
-        _p(r"(?:enter|type|create|add|use)\s+(?:the\s+)?(?:a\s+)?\w+\s+formula\b"),  # P2-13: "enter a SUM formula"
+        _p(r"(?:enter|type|create|add|use)\s+(?:the\s+)?(?:an?\s+)?\w+\s+formula\b"),  # P2-13: "enter a SUM formula"
         _p(r"using\s+(?:the\s+)?\w+\s+function\b"),  # P0-3: "using the X function"
         _p(r"\b(?:TODAY|NOW|DATE|YEAR|MONTH|HOUR|MINUTE|SECOND)\s+function\b"),  # P0-3: date/time function names
         _p(r"(?:in\s+cell\s+[A-Z]{1,3}\d{1,7}),?\s*(?:enter|type)\s+="),
@@ -257,7 +257,7 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
         _p(r"(?:clustered|stacked|100%?\s+stacked)\s+(?:bar|column)"),
         _p(r"(?:2-?D|3-?D)\s+(?:bar|column)\s+chart"),
         _p(r"(?:change|switch)\s+(?:the\s+)?chart\s+(?:type\s+)?to\s+(?:a\s+)?(?:bar|column)\b"),  # P2-11
-        _p(r"(?:add|change|format|remove)\s+(?:a\s+)?(?:chart\s+)?(?:title|trendline|data\s+labels?|legend|axis)"),  # P1-8: chart modifications
+        _p(r"(?:add|change|format|remove)\s+(?:a\s+|the\s+)?(?:chart\s+)?(?:title|trendline|data\s+labels?|legend|axis)"),  # P1-8: chart modifications
     ],
     TaskType.CHART_LINE: [
         _p(r"(?:create|insert|add)\s+(?:a\s+)?line\s+chart"),

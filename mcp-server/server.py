@@ -428,7 +428,7 @@ def get_engine_status() -> str:
     config = EngineConfig()
     return json.dumps({
         "engine_version": engine_version,
-        "mcp_server_version": "1.0.0",
+        "mcp_server_version": "1.1.0",
         "available_layers": [
             {"number": layer.value, "name": layer.name}
             for layer in Layer
@@ -449,6 +449,12 @@ def get_engine_status() -> str:
             "sam_fingerprint_protected": config.sam_fingerprint_protected,
             "retina_display": config.retina_display,
             "vba_split_threshold": config.vba_split_threshold,
+            "parallel_execution": getattr(config, "parallel_execution", False),
+            "max_workers": getattr(config, "max_workers", 4),
+            "circuit_breaker_threshold": getattr(config, "circuit_breaker_threshold", 5),
+            "circuit_breaker_reset_seconds": getattr(config, "circuit_breaker_reset_seconds", 300),
+            "recalculate_formulas": getattr(config, "recalculate_formulas", False),
+            "recalc_timeout": getattr(config, "recalc_timeout", 60),
         },
     }, indent=2)
 

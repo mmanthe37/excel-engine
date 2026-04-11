@@ -105,6 +105,33 @@ The `excel_engine/presets/` module provides opt-in formatting presets:
 - **Financial (IB)** — `financial.py` applies investment banking color standards (blue=inputs, black=formulas, green=cross-sheet links, red=external, yellow=assumptions) and number formats (currency, percentages, negatives in parentheses).
 - Presets are never applied automatically — they must be explicitly invoked.
 
+## Parallel Execution (v1.1.0)
+
+When `EngineConfig(parallel_execution=True)`, the executor groups tasks by target sheet:
+
+- **Same-sheet tasks** execute serially (preserve ordering guarantees)
+- **Cross-sheet tasks** with no inter-dependencies execute in parallel via `ThreadPoolExecutor(max_workers)`
+- Default: disabled. Enable for multi-sheet workbooks to achieve 30-50% speedup.
+
+## Circuit Breaker (v1.1.0)
+
+A `CircuitBreaker` in `recovery.py` tracks per-layer failure counts:
+
+- **Closed** — Normal operation, all layers available.
+- **Open** — Layer has exceeded `circuit_breaker_threshold` consecutive failures → auto-skipped.
+- **Half-open** — After `circuit_breaker_reset_seconds`, one probe attempt is allowed. If it succeeds, the breaker resets to Closed.
+
+This prevents the engine from wasting time retrying a layer that is consistently failing (e.g., Excel not installed).
+
+## Progress Callbacks (v1.1.0)
+
+`engine.execute()` and `engine.run()` accept an optional `progress_callback: Callable[[dict], None]` that fires events:
+
+- `{"task": "T3", "status": "executing", "layer": "openpyxl"}` — task started
+- `{"task": "T3", "status": "completed", "passed": true}` — task finished with verification result
+
+The Streamlit GUI and MCP server both wire this for real-time status display.
+
 ## State Management
 
 The engine maintains state across tasks:

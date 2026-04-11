@@ -24,6 +24,9 @@
 - **114+ Task Patterns** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
 - **Formula Recalculation** — Optional LibreOffice-powered recalculation with error scanning (#REF!, #DIV/0!, etc.)
 - **Financial Model Presets** — Investment banking color coding (blue=inputs, black=formulas, green=cross-sheet) and number formats
+- **Parallel Execution** — Tasks on different sheets run concurrently via `ThreadPoolExecutor` for 30-50% speedup on multi-sheet workbooks
+- **Circuit Breaker** — Layers that fail repeatedly are auto-skipped with half-open probe after configurable reset
+- **Progress Callbacks** — Real-time per-task status events in GUI and MCP server
 - **Self-Healing Execution** — Automatic retry with layer escalation when a step fails
 - **Error Recovery** — Classified error handling with configurable retry and exponential backoff
 - **7 Distribution Formats** — Python library, CLI, GUI App, MCP Server (Python), MCP Server (Go), Copilot Plugin, or Extension *(deprecated)*

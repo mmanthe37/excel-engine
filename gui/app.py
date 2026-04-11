@@ -57,6 +57,24 @@ with st.sidebar:
     verify = st.checkbox("Double-check results after each step", value=True)
 
     st.divider()
+    with st.expander("🚀 Performance Options", expanded=False):
+        parallel_exec = st.checkbox(
+            "Parallel execution (multi-sheet workbooks)",
+            value=False,
+            help="Execute tasks on different sheets in parallel for faster processing.",
+        )
+        max_workers = st.slider(
+            "Max parallel workers", 2, 8, 4,
+            disabled=not parallel_exec,
+            help="Number of threads for parallel execution.",
+        )
+        circuit_breaker = st.checkbox(
+            "Circuit breaker (skip failing layers)",
+            value=True,
+            help="Automatically skip layers that fail repeatedly instead of retrying endlessly.",
+        )
+
+    st.divider()
     with st.expander("ℹ️ Engine Info", expanded=False):
         st.write(f"**Version:** {__version__}")
 
@@ -217,6 +235,13 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
             if phase == "Standard Mode (works everywhere)":
                 config.layer_order = [Layer.OPENPYXL]
 
+            # v1.1.0 features
+            if hasattr(config, "parallel_execution"):
+                config.parallel_execution = parallel_exec
+                config.max_workers = max_workers
+            if hasattr(config, "circuit_breaker_threshold"):
+                config.circuit_breaker_threshold = 5 if circuit_breaker else 0
+
             engine = ExcelEngine(config)
 
             # ── Unified scan → plan → (dry-run check) → execute path ──
@@ -274,10 +299,27 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
                     st.session_state.result = None
                     st.session_state.processed_bytes = None
                 else:
-                    # Step 3: Execute
+                    # Step 3: Execute with real-time progress callback
                     status_text.text("⚡ Executing tasks...")
                     progress_bar.progress(50)
-                    result = engine.execute(plan, wb_path)
+
+                    task_log = st.empty()
+
+                    def _gui_progress(event: dict) -> None:
+                        """Update Streamlit UI with per-task progress."""
+                        task_id = event.get("task", "")
+                        status = event.get("status", "")
+                        if status == "executing":
+                            status_text.text(f"⚡ Executing: {task_id}...")
+                        elif status == "completed":
+                            passed = event.get("passed", None)
+                            icon = "✅" if passed else ("❌" if passed is False else "⏩")
+                            status_text.text(f"{icon} {task_id} done")
+
+                    result = engine.execute(
+                        plan, wb_path,
+                        progress_callback=_gui_progress,
+                    )
                     progress_bar.progress(90)
 
                     # Step 4: Done

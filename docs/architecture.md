@@ -88,6 +88,23 @@ The engine determines which layers are applicable for each checkpoint type:
 - **ExcelNotRunningError** — Excel is not open or has crashed. The engine attempts to relaunch and reopen the workbook.
 - **Error Recovery** — Errors are classified by type and severity, with configurable retry counts and exponential backoff between attempts.
 
+## Phase 4: Formula Recalculation (v1.1.0)
+
+After all sections are executed and verified, the engine optionally runs a recalculation phase:
+
+1. **LibreOffice Recalc** — Uses headless `soffice` with a StarBasic macro to force-recalculate all formulas and save computed values.
+2. **Formula Error Scan** — Two-pass openpyxl scan detects #REF!, #DIV/0!, #VALUE!, #NAME?, #NULL!, #NUM!, #N/A across all sheets (works without LibreOffice).
+3. **Result Integration** — Formula errors are stored in `EngineResult.formula_errors` and displayed in the GUI.
+
+Enable with `EngineConfig(recalculate_formulas=True)`. Gracefully skips if LibreOffice is not installed.
+
+## Presets Subsystem (v1.1.0)
+
+The `excel_engine/presets/` module provides opt-in formatting presets:
+
+- **Financial (IB)** — `financial.py` applies investment banking color standards (blue=inputs, black=formulas, green=cross-sheet links, red=external, yellow=assumptions) and number formats (currency, percentages, negatives in parentheses).
+- Presets are never applied automatically — they must be explicitly invoked.
+
 ## State Management
 
 The engine maintains state across tasks:

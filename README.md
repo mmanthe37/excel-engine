@@ -22,9 +22,11 @@
 - **6-Layer Automation Architecture** — Cascading strategy from lightweight file I/O to full desktop control
 - **Section-Based Planning** — Reads assignment instructions, decomposes into ordered tasks, and executes them sequentially
 - **114+ Task Patterns** — Battle-tested against real SAM training modules covering formulas, formatting, charts, PivotTables, and more
+- **Formula Recalculation** — Optional LibreOffice-powered recalculation with error scanning (#REF!, #DIV/0!, etc.)
+- **Financial Model Presets** — Investment banking color coding (blue=inputs, black=formulas, green=cross-sheet) and number formats
 - **Self-Healing Execution** — Automatic retry with layer escalation when a step fails
 - **Error Recovery** — Classified error handling with configurable retry and exponential backoff
-- **6 Distribution Formats** — Use as a Python library, CLI tool, GUI App, MCP Server (recommended AI interface), Copilot CLI Extension *(deprecated — use MCP Server)*, or Copilot Plugin
+- **7 Distribution Formats** — Python library, CLI, GUI App, MCP Server (Python), MCP Server (Go), Copilot Plugin, or Extension *(deprecated)*
 - **Cross-Platform GUI** — Browser-based GUI works on macOS, Windows, and Linux — no terminal needed
 - **macOS-Native Desktop Layers** — Layers 2–6 use AppleScript, System Events, and Accessibility APIs (macOS only); Layer 1 (openpyxl) works everywhere
 
@@ -148,9 +150,10 @@ See [`plugin/README.md`](plugin/README.md) for setup instructions.
 | 1 | Python Library | Import and use in your own scripts | All | `pip install -e .` → `from excel_engine import ExcelEngine` |
 | 2 | CLI Tool | Command-line interface | All | `excel-engine run assignment.xlsx instructions.docx` |
 | 3 | GUI App | Cross-platform browser GUI | macOS, Windows, Linux | Double-click launcher → browser UI |
-| 4 | MCP Server | AI assistant integration (recommended) | All | `python mcp-server/server.py` |
-| 5 | Copilot CLI Extension | *(Deprecated — use MCP Server)* | macOS | See `extensions/README.md` |
+| 4 | MCP Server (Python) | AI assistant integration (recommended) | All | `python mcp-server/server.py` |
+| 5 | MCP Server (Go) | High-performance MCP bridge | All | `cd go-mcp-server && go build && ./go-mcp-server` |
 | 6 | Copilot Plugin | GitHub Copilot Chat integration | All | See `plugin/README.md` |
+| 7 | Copilot CLI Extension | *(Deprecated — removed in v1.1.0, use MCP Server)* | macOS | — |
 
 > **Note:** Layers 2–6 of the automation engine (xlwings, AppleScript, System Events, VBA, PyAutoGUI) are macOS-only. The GUI and CLI use Layer 1 (openpyxl) on all platforms.
 
@@ -231,7 +234,7 @@ verification = engine.verify(
 print(f"Passed: {verification.pass_count}, Failed: {verification.fail_count}")
 ```
 
-### MCP Server
+### MCP Server (Python)
 
 The MCP server (`mcp-server/server.py`) exposes 6 tools for AI assistant integration:
 
@@ -250,10 +253,50 @@ Run the server:
 python mcp-server/server.py
 ```
 
-### Copilot CLI Extension *(Deprecated)*
+### MCP Server (Go)
 
-> **Note:** The Copilot CLI Extension is deprecated. Use the MCP Server for
-> AI-powered interactions. See [`mcp-server/README.md`](mcp-server/README.md).
+A high-performance Go implementation that bridges MCP protocol to the Python engine via subprocess. Same 6 tools as the Python server but compiled to a single binary with no Python runtime needed at the MCP layer.
+
+```bash
+cd go-mcp-server
+go build -o go-mcp-server .
+./go-mcp-server  # Communicates via stdio transport
+```
+
+Environment variables: `EXCEL_ENGINE_SERVER_NAME`, `EXCEL_ENGINE_VERSION`, `EXCEL_ENGINE_PYTHON_PATH`, `EXCEL_ENGINE_TIMEOUT`.
+
+See [`go-mcp-server/README.md`](go-mcp-server/README.md) for details.
+
+### Formula Recalculation
+
+Excel Engine can optionally recalculate formulas using LibreOffice headless mode and scan for formula errors:
+
+```python
+from excel_engine import EngineConfig
+
+config = EngineConfig(recalculate_formulas=True, recalc_timeout=60)
+result = engine.run(workbook=Path("file.xlsx"), instructions=Path("instr.docx"))
+if result.formula_errors:
+    for err in result.formula_errors:
+        print(f"  {err}")
+```
+
+If LibreOffice is not installed, recalculation is silently skipped. Formula error scanning (for #REF!, #DIV/0!, etc.) works without LibreOffice using openpyxl.
+
+### Financial Presets
+
+Opt-in formatting presets for investment banking and financial modeling standards:
+
+```python
+from excel_engine.presets.financial import apply_ib_colors, apply_number_formats
+
+apply_ib_colors(workbook)       # Blue=inputs, black=formulas, green=cross-sheet
+apply_number_formats(workbook)  # Currency, percentages, negative in parens
+```
+
+### Copilot CLI Extension *(Removed)*
+
+> The Copilot CLI Extension was removed in v1.1.0. Use the MCP Server (Python or Go) for AI-powered interactions.
 
 ### Copilot Plugin
 
@@ -306,8 +349,8 @@ excel-engine/
 │   ├── config.py               # EngineConfig, Layer, TaskType enums
 │   ├── interactive.py          # Interactive guided mode
 │   ├── recovery.py             # Error recovery with retry and backoff
+│   ├── recalc.py               # LibreOffice formula recalculation + error scanning
 │   ├── layers/                 # 6-layer automation stack
-│   │   ├── __init__.py
 │   │   ├── openpyxl_layer.py   # Layer 1: offline file I/O
 │   │   ├── xlwings_layer.py    # Layer 2: live Excel bridge
 │   │   ├── applescript_layer.py # Layer 3: Excel-specific commands
@@ -315,51 +358,43 @@ excel-engine/
 │   │   ├── vba_layer.py        # Layer 5: VBA via VBE
 │   │   └── pyautogui_layer.py  # Layer 6: last-resort desktop control
 │   ├── parsers/                # Instruction parsing
-│   │   ├── __init__.py
 │   │   ├── instruction_parser.py  # .docx/.rtfd/.pdf/.txt reader
 │   │   └── task_extractor.py      # Natural language → Task objects
 │   ├── planner/                # Execution planning
-│   │   ├── __init__.py
 │   │   ├── dependency_graph.py # Task dependency resolution
 │   │   └── task_planner.py     # Section-based ExecutionPlan builder
+│   ├── presets/                # Formatting presets
+│   │   └── financial.py        # IB color coding + number formats
 │   ├── verifier/               # Completion verification
-│   │   ├── __init__.py
 │   │   └── workbook_verifier.py # Cell/formula/format/structure checks
 │   └── utils/                  # Shared utilities
-│       ├── __init__.py
 │       ├── excel_constants.py  # Excel format constants
 │       ├── mac_utils.py        # macOS-specific helpers
 │       └── path_handler.py     # Path resolution and normalization
-├── mcp-server/                 # MCP Server (AI assistant interface)
+├── mcp-server/                 # MCP Server — Python (AI assistant interface)
 │   ├── __main__.py
 │   └── server.py               # FastMCP server with 6 tools
-├── extensions/                 # Copilot CLI Extension (deprecated)
-│   ├── excel-engine.py
-│   └── README.md
+├── go-mcp-server/              # MCP Server — Go (high-performance bridge)
+│   ├── main.go                 # Entry point with stdio transport
+│   ├── go.mod
+│   ├── config/config.go        # Environment-based configuration
+│   └── tools/                  # Tool definitions + Python subprocess bridge
+│       ├── registry.go         # 6 MCP tool registrations
+│       ├── handlers.go         # Tool handler logic
+│       └── bridge.go           # Python subprocess bridge
 ├── plugin/                     # Copilot Plugin
 │   ├── install.sh
-│   ├── README.md
 │   ├── agents/
 │   │   └── excel-engine-agent.md
 │   └── skills/
-│       ├── excel-automation/
-│       └── instruction-parsing/
 ├── gui/                        # Cross-platform GUI app
 │   ├── README.md               # Non-technical user guide
-│   ├── run_app.py              # Gradio/Streamlit GUI application
+│   ├── app.py                  # Streamlit GUI application
 │   ├── build_app.py            # Standalone app builder
-│   ├── BUILD.md                # Build instructions
-│   ├── launch.command           # macOS launcher (double-click)
+│   ├── launch.command          # macOS launcher (double-click)
 │   ├── launch.bat              # Windows launcher (double-click)
 │   └── launch.sh               # Linux launcher (double-click)
-├── tests/                      # Test suite
-│   ├── conftest.py
-│   ├── test_engine.py
-│   ├── test_parsers.py
-│   ├── test_planner.py
-│   ├── test_layers.py
-│   ├── test_integration.py
-│   └── test_e2e_sam.py
+├── tests/                      # Test suite (600+ tests)
 ├── docs/                       # Documentation
 │   ├── architecture.md
 │   ├── layers.md

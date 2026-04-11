@@ -62,7 +62,7 @@ def build():
     subprocess.run(cmd, check=True, cwd=str(project_dir))
     
     print()
-    print(f"✅ Build complete!")
+    print("Build complete!")
     print(f"   Output: {project_dir / 'dist' / name}")
 
 if __name__ == "__main__":

@@ -41,8 +41,13 @@ The app needs Python to run. Download it free from [python.org/downloads](https:
 
 **Windows users:** When installing Python, make sure to check ✅ **"Add Python to PATH"** at the bottom of the installer!
 
-### The app won't open
-- **Mac:** You may need to right-click → "Open" the first time (macOS security)
+### The app won't open / "Apple could not verify" (Mac)
+- **Mac standalone .app:** macOS Gatekeeper blocks unsigned apps. To open it:
+  1. **Right-click** (or Control-click) the app → click **"Open"**
+  2. Click **"Open"** again in the confirmation dialog
+  3. It will open normally from now on
+  - *Alternative:* Go to **System Settings → Privacy & Security** → click **"Open Anyway"** next to the blocked app message
+- **Mac launcher:** You may need to right-click → "Open" the first time
 - **Windows:** If Windows Defender blocks it, click "More info" → "Run anyway"
 - **Linux:** You may need to make it executable: right-click → Properties → Permissions → "Allow executing"
 
@@ -55,10 +60,10 @@ The app needs Python to run. Download it free from [python.org/downloads](https:
 
 ## Standalone App (No Python Needed)
 
-If you don't want to install Python, look for pre-built versions in the [Releases](https://github.com/mmanthe37/excel-engine/releases) page on GitHub:
-- **Mac:** `ExcelEngine.dmg` — drag to Applications
-- **Windows:** `ExcelEngine.zip` — unzip and double-click `ExcelEngine.exe`
-- **Linux:** `excel-engine-gui-linux.tar.gz` — extract and run
+Download pre-built versions from the [Releases](https://github.com/mmanthe37/excel-engine/releases) page:
+- **Mac:** `ExcelEngine-macOS.zip` — unzip, then **right-click → Open** the first time (macOS blocks unsigned apps)
+- **Windows:** `ExcelEngine-Windows.zip` — unzip and double-click `Excel Engine.exe` (click "Run anyway" if prompted)
+- **Linux:** `ExcelEngine-Linux.tar.gz` — extract and run `./Excel Engine`
 
 ---
 

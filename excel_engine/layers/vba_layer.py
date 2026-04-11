@@ -30,6 +30,9 @@ from excel_engine.utils.mac_utils import MacUtils
 
 logger = logging.getLogger(__name__)
 
+SENTINEL_SHEET = "__excel_engine_sentinel"
+POLL_INTERVAL = 0.5
+
 
 class VBALayer:
     """Layer 5 — VBA code execution via clipboard injection into VBE."""
@@ -38,22 +41,82 @@ class VBALayer:
         self,
         execution_timeout: float = 45.0,
         split_threshold: int = 50,
+        poll_interval: float = POLL_INTERVAL,
+        sentinel_checker=None,
     ) -> None:
         self.execution_timeout = execution_timeout
         self.split_threshold = split_threshold
+        self.poll_interval = poll_interval
+        self._sentinel_checker = sentinel_checker
 
     @staticmethod
     def _escape_vba(s: str) -> str:
         """Escape a string for VBA string literals (double quotes → double-double quotes)."""
         return s.replace('"', '""')
 
+    @staticmethod
+    def inject_sentinel(code: str) -> str:
+        """Append VBA lines that create a sentinel sheet and write "DONE" to A1.
+
+        The sentinel is placed just before ``End Sub`` in the last subroutine so
+        it fires after all real work completes.
+        """
+        sentinel_lines = (
+            f'\n    On Error Resume Next\n'
+            f'    Dim __sentWs As Worksheet\n'
+            f'    Set __sentWs = Nothing\n'
+            f'    Set __sentWs = ActiveWorkbook.Sheets("{SENTINEL_SHEET}")\n'
+            f'    If __sentWs Is Nothing Then\n'
+            f'        Set __sentWs = ActiveWorkbook.Sheets.Add(After:=ActiveWorkbook.Sheets(ActiveWorkbook.Sheets.Count))\n'
+            f'        __sentWs.Name = "{SENTINEL_SHEET}"\n'
+            f'    End If\n'
+            f'    __sentWs.Range("A1").Value = "DONE"\n'
+            f'    Set __sentWs = Nothing\n'
+            f'    On Error GoTo 0\n'
+        )
+        # Insert before the last 'End Sub'
+        last_end = code.rfind("End Sub")
+        if last_end == -1:
+            return code + sentinel_lines + "\nEnd Sub\n"
+        return code[:last_end] + sentinel_lines + code[last_end:]
+
+    def _check_sentinel(self) -> bool:
+        """Check whether the sentinel cell has been set to DONE.
+
+        Uses the injected ``sentinel_checker`` callable if provided (for
+        testing), otherwise tries xlwings/AppleScript.
+        """
+        if self._sentinel_checker is not None:
+            return self._sentinel_checker()
+        try:
+            import xlwings as xw
+            wb = xw.books.active
+            ws = wb.sheets[SENTINEL_SHEET]
+            return ws.range("A1").value == "DONE"
+        except Exception:
+            return False
+
+    def _cleanup_sentinel(self) -> None:
+        """Delete the sentinel sheet after execution completes."""
+        try:
+            import xlwings as xw
+            wb = xw.books.active
+            app = wb.app
+            app.display_alerts = False
+            wb.sheets[SENTINEL_SHEET].delete()
+            app.display_alerts = True
+        except Exception:
+            pass
+
     # ── Core Execution ──
 
     def execute_vba(self, code: str) -> None:
         """
         Execute VBA code by injecting it into the VBE via clipboard.
-        Steps: pbcopy → Option+F11 → Cmd+A → Cmd+V → F5
+        Steps: inject sentinel → pbcopy → Option+F11 → Cmd+A → Cmd+V → F5 → poll for completion.
         """
+        code = self.inject_sentinel(code)
+
         MacUtils.activate_excel()
         time.sleep(0.5)
 
@@ -90,9 +153,25 @@ class VBALayer:
             '    key code 96\n'  # F5 = key code 96
             'end tell'
         )
-        # TODO: Replace fixed 45s sleep with polling-based VBA completion detection
-        # e.g., check for a sentinel cell value that VBA sets when done
-        time.sleep(self.execution_timeout)
+
+        # Poll for sentinel "DONE" instead of fixed sleep
+        deadline = time.time() + self.execution_timeout
+        completed = False
+        while time.time() < deadline:
+            try:
+                if self._check_sentinel():
+                    completed = True
+                    logger.info("VBA sentinel detected — macro completed early")
+                    break
+            except Exception:
+                pass
+            time.sleep(self.poll_interval)
+
+        if not completed:
+            logger.warning("VBA execution timed out after %.1fs", self.execution_timeout)
+
+        # Clean up sentinel sheet
+        self._cleanup_sentinel()
 
         # Close VBE: Option + F11
         MacUtils.run_applescript(

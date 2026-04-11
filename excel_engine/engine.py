@@ -19,14 +19,16 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from excel_engine.config import EngineConfig, TaskType, Layer
 from excel_engine.recalc import recalculate, RecalcResult
-from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError
+from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError, CircuitBreaker
 from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
 from excel_engine.layers.xlwings_layer import XlwingsLayer
 from excel_engine.layers.applescript_layer import AppleScriptLayer
@@ -133,6 +135,12 @@ class ExcelEngine:
         self._verifier = WorkbookVerifier()
         self.path_handler = PathHandler(desktop_path=self.config.desktop_path)
 
+        # Circuit breaker for layer cascade
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=self.config.circuit_breaker_threshold,
+            reset_timeout=self.config.circuit_breaker_reset_seconds,
+        )
+
         # Layer lookup
         self._layers = {
             Layer.OPENPYXL: self._openpyxl,
@@ -187,7 +195,8 @@ class ExcelEngine:
 
     # ── Main Entry Point ──
 
-    def execute(self, plan: ExecutionPlan, workbook: Path) -> EngineResult:
+    def execute(self, plan: ExecutionPlan, workbook: Path,
+                progress_callback: Optional[Callable[[dict], None]] = None) -> EngineResult:
         """Execute a pre-built plan against a workbook."""
         start_time = time.time()
         workbook = Path(workbook).resolve()
@@ -207,7 +216,10 @@ class ExcelEngine:
             logger.info("=" * 60)
 
             for section in plan.sections:
-                section_ok = self._execute_section(section, workbook, result)
+                section_ok = self._execute_section(
+                    section, workbook, result,
+                    progress_callback=progress_callback,
+                )
                 if section_ok:
                     result.sections_completed += 1
 
@@ -261,6 +273,7 @@ class ExcelEngine:
         instructions: Optional[Path] = None,
         instruction_text: Optional[str] = None,
         tasks: Optional[list[Task]] = None,
+        progress_callback: Optional[Callable[[dict], None]] = None,
     ) -> EngineResult:
         """
         Run the engine on a workbook with instructions.
@@ -302,7 +315,7 @@ class ExcelEngine:
             logger.info("\n%s", plan.summary())
 
             # ── Phase 3: EXECUTE ──
-            return self.execute(plan, workbook)
+            return self.execute(plan, workbook, progress_callback=progress_callback)
 
         except Exception as e:
             logger.exception("Engine failed during scan/plan: %s", e)
@@ -320,27 +333,65 @@ class ExcelEngine:
     # ── Section Execution ──
 
     def _execute_section(
-        self, section: Section, workbook: Path, result: EngineResult
+        self, section: Section, workbook: Path, result: EngineResult,
+        progress_callback: Optional[Callable[[dict], None]] = None,
     ) -> bool:
-        """Execute all tasks in a section."""
+        """Execute all tasks in a section.
+
+        When ``config.parallel_execution`` is enabled, tasks targeting
+        *different* sheets with no cross-references run concurrently via a
+        thread pool. Tasks on the *same* sheet always execute serially to
+        preserve ordering semantics.
+        """
         logger.info("-" * 40)
         logger.info("Section %s: %s (%d tasks)", section.id, section.name, section.task_count)
         logger.info("-" * 40)
 
+        total_tasks = section.task_count
         section_ok = True
 
-        for task in section.tasks:
-            task_ok, task_errors = self._execute_task(task, workbook)
-            result.task_errors.extend(task_errors)
-            if task_ok:
-                task.completed = True
-                result.tasks_completed += 1
-            else:
-                section_ok = False
-                result.failed_tasks.append(task.id)
-                result.errors.append(
-                    f"Task {task.id} ({task.task_type.value}) failed"
-                )
+        if self.config.parallel_execution:
+            section_ok = self._execute_section_parallel(
+                section, workbook, result, total_tasks, progress_callback,
+            )
+        else:
+            for idx, task in enumerate(section.tasks):
+                if progress_callback:
+                    progress_callback({
+                        "phase": "executing",
+                        "task": task.id,
+                        "index": idx,
+                        "total": total_tasks,
+                    })
+
+                task_ok, task_errors = self._execute_task(task, workbook)
+                result.task_errors.extend(task_errors)
+
+                if task_ok:
+                    task.completed = True
+                    result.tasks_completed += 1
+                    if progress_callback:
+                        progress_callback({
+                            "phase": "completed",
+                            "task": task.id,
+                            "index": idx,
+                            "total": total_tasks,
+                            "success": True,
+                        })
+                else:
+                    section_ok = False
+                    result.failed_tasks.append(task.id)
+                    result.errors.append(
+                        f"Task {task.id} ({task.task_type.value}) failed"
+                    )
+                    if progress_callback:
+                        progress_callback({
+                            "phase": "completed",
+                            "task": task.id,
+                            "index": idx,
+                            "total": total_tasks,
+                            "success": False,
+                        })
 
         # Verify section if configured
         if self.config.verify_after_each_section:
@@ -360,6 +411,83 @@ class ExcelEngine:
                 logger.warning("Verification error for section %s: %s", section.id, e)
 
         section.completed = section_ok
+        return section_ok
+
+    def _execute_section_parallel(
+        self,
+        section: Section,
+        workbook: Path,
+        result: EngineResult,
+        total_tasks: int,
+        progress_callback: Optional[Callable[[dict], None]] = None,
+    ) -> bool:
+        """Run tasks in parallel grouped by sheet.
+
+        Tasks on the same sheet run serially (order matters). Tasks on
+        different sheets with no cross-references run concurrently.
+        """
+        # Group tasks by target sheet
+        sheet_groups: dict[str, list[Task]] = defaultdict(list)
+        for task in section.tasks:
+            key = task.sheet or "__default__"
+            sheet_groups[key].append(task)
+
+        section_ok = True
+        completed_idx = 0
+
+        def _run_sheet_group(sheet_key: str, tasks: list[Task]):
+            nonlocal section_ok, completed_idx
+            group_ok = True
+            for task in tasks:
+                if progress_callback:
+                    progress_callback({
+                        "phase": "executing",
+                        "task": task.id,
+                        "total": total_tasks,
+                    })
+
+                task_ok, task_errors = self._execute_task(task, workbook)
+                result.task_errors.extend(task_errors)
+
+                if task_ok:
+                    task.completed = True
+                    result.tasks_completed += 1
+                    if progress_callback:
+                        progress_callback({
+                            "phase": "completed",
+                            "task": task.id,
+                            "total": total_tasks,
+                            "success": True,
+                        })
+                else:
+                    group_ok = False
+                    result.failed_tasks.append(task.id)
+                    result.errors.append(
+                        f"Task {task.id} ({task.task_type.value}) failed"
+                    )
+                    if progress_callback:
+                        progress_callback({
+                            "phase": "completed",
+                            "task": task.id,
+                            "total": total_tasks,
+                            "success": False,
+                        })
+            return group_ok
+
+        if len(sheet_groups) == 1:
+            # Single sheet — just run serially, no thread overhead
+            key, tasks = next(iter(sheet_groups.items()))
+            section_ok = _run_sheet_group(key, tasks)
+        else:
+            with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
+                futures = {
+                    pool.submit(_run_sheet_group, key, tasks): key
+                    for key, tasks in sheet_groups.items()
+                }
+                for future in as_completed(futures):
+                    if not future.result():
+                        section_ok = False
+
         return section_ok
 
     # ── Task Execution ──
@@ -382,14 +510,25 @@ class ExcelEngine:
         )
 
         for layer_enum in layers_to_try:
+            layer_name = layer_enum.name
+
+            # A5: Circuit breaker — skip layers that are consistently failing
+            if self.circuit_breaker.is_open(layer_name):
+                logger.info(
+                    "  Skipping Layer %s for task %s (circuit breaker open)",
+                    layer_name, task.id,
+                )
+                continue
+
             attempt = 0
             while True:
                 try:
                     logger.info(
                         "  Task %s: %s via Layer %s (attempt %d)",
-                        task.id, task.task_type.value, layer_enum.name, attempt + 1,
+                        task.id, task.task_type.value, layer_name, attempt + 1,
                     )
                     self._dispatch_task(task, layer_enum, workbook)
+                    self.circuit_breaker.record_success(layer_name)
                     return True, collected_errors
                 except Exception as e:
                     error_type = ErrorClassifier.classify(e, layer_enum)
@@ -402,12 +541,13 @@ class ExcelEngine:
                         timestamp=time.time(),
                     )
                     collected_errors.append(task_error)
+                    self.circuit_breaker.record_failure(layer_name)
 
                     if strategy.should_retry(error_type, attempt):
                         delay = strategy.get_delay(attempt)
                         logger.warning(
                             "  Layer %s transient error for %s (attempt %d/%d): %s — retrying in %.1fs",
-                            layer_enum.name, task.id, attempt + 1,
+                            layer_name, task.id, attempt + 1,
                             strategy.max_retries, e, delay,
                         )
                         time.sleep(delay)
@@ -415,7 +555,7 @@ class ExcelEngine:
                     else:
                         logger.warning(
                             "  Layer %s %s error for %s: %s — escalating to next layer",
-                            layer_enum.name, error_type, task.id, e,
+                            layer_name, error_type, task.id, e,
                         )
                         break  # move to next layer
 

@@ -144,20 +144,24 @@ _PATTERNS: dict[TaskType, list[re.Pattern]] = {
     ],
 
     # ── Conditional Formatting ──
+    # NOTE: Patterns must require an explicit conditional-formatting keyword to
+    # avoid false positives on basic "format the cells as bold" phrases.
     TaskType.CONDITIONAL_FORMAT: [
         _p(r"conditional\s+format"),
-        _p(r"highlight\s+cells?\s+(?:rules?|that|greater|less|between|equal|containing)"),
+        _p(r"conditional(?:ly)?\s+formatted?\b"),
+        _p(r"highlight\s+cells?\s+rules?\b"),
+        _p(r"highlight\s+cells?\s+(?:that|greater|less|between|equal|containing)\b"),
         _p(r"(?:color|colour)\s+scale"),
-        _p(r"data\s+bars?"),
-        _p(r"icon\s+sets?"),
+        _p(r"data\s+bars?\b"),
+        _p(r"icon\s+sets?\b"),
         _p(r"top\s*/?bottom\s+(?:\d+|rules?)"),
         _p(r"(?:above|below)\s+average\s+(?:rule|formatting|highlight)"),
         _p(r"duplicate\s+values?\s+(?:rule|formatting|highlight)"),
         _p(r"new\s+(?:formatting\s+)?rule"),
-        # Conditional instruction patterns (if/when value conditions)
+        # Conditional instruction patterns — value-condition-then-format (P2-12)
         _p(r"if\s+(?:the\s+)?value\s+in\s+cell\s+[A-Z]{1,3}\d{1,7}\s+is\s+(?:greater|less|equal|not)"),
         _p(r"when\s+(?:the\s+)?(?:total|value|sum|count)\s+(?:exceeds?|is\s+(?:greater|less|over|under))"),
-        _p(r"if\s+(?:the\s+)?(?:total|value|sum|number|count).+?format\s+(?:it\s+)?(?:in|as|with)\s+\w+"),  # P2-12: "if total exceeds 1000, format in red"
+        _p(r"if\s+(?:the\s+)?(?:total|value|sum|number|count).+?format\s+(?:it\s+)?(?:in|as|with)\s+\w+"),
     ],
 
     # ── Number Format ──
@@ -450,6 +454,49 @@ _NUMERIC_REF = re.compile(
     r"(?:to|of|=)\s+(\d+(?:\.\d+)?)\b",
 )
 
+# ── Expanded numeric value extraction ──
+# Matches percentages, currency, scientific notation, parenthetical negatives,
+# and plain numbers (with optional thousands separators).
+_EXPANDED_NUMERIC = re.compile(
+    r"(?:"
+    r"(?P<pct>\d+(?:\.\d+)?)\s*%"                      # 25%, 3.5%
+    r"|"
+    r"\$\s*(?P<cur>[\d,]+(?:\.\d+)?)"                   # $1,234.56
+    r"|"
+    r"(?P<sci>\d+(?:\.\d+)?[eE][+\-]?\d+)"             # 1.5e-3, 2E10
+    r"|"
+    r"\((?P<neg>[\d,]+(?:\.\d+)?)\)"                    # (100), (1,234.56)
+    r"|"
+    r"(?P<plain>\d[\d,]*(?:\.\d+)?)"                    # 1,234.56 or 42
+    r")",
+    re.I,
+)
+
+
+def extract_numeric_value(text: str) -> str | None:
+    """Extract and normalise the first numeric literal from *text*.
+
+    Returns a string representation:
+    - Percentages keep the ``%`` suffix (``"25%"``).
+    - Currency / thousands-separated values become plain numbers (``"1234.56"``).
+    - Scientific notation is left as-is (``"1.5e-3"``).
+    - Parenthetical negatives become negative numbers (``"-100"``).
+    """
+    m = _EXPANDED_NUMERIC.search(text)
+    if m is None:
+        return None
+    if m.group("pct") is not None:
+        return f'{m.group("pct")}%'
+    if m.group("cur") is not None:
+        return m.group("cur").replace(",", "")
+    if m.group("sci") is not None:
+        return m.group("sci")
+    if m.group("neg") is not None:
+        return f'-{m.group("neg").replace(",", "")}'
+    if m.group("plain") is not None:
+        return m.group("plain").replace(",", "")
+    return None
+
 
 class TaskExtractor:
     """Extract structured Task objects from instruction text."""
@@ -635,6 +682,8 @@ class TaskExtractor:
             task.value = val_match.group(1)
 
         # ── Extract bare numeric value for CELL_VALUE tasks ──  (P2-14)
+        # First try the original bare_num pattern (preserves commas as-is).
+        # Then fall back to the expanded extractor for %, $, scientific, parens.
         if task_type == TaskType.CELL_VALUE and not task.value:
             bare_num = re.search(
                 r"(?:enter|type|input|put)\s+(?:the\s+)?(?:number\s+)?(\d[\d,.]*)",
@@ -642,6 +691,10 @@ class TaskExtractor:
             )
             if bare_num:
                 task.value = bare_num.group(1)
+            else:
+                expanded = extract_numeric_value(line)
+                if expanded:
+                    task.value = expanded
 
         return task
 

@@ -223,6 +223,14 @@ class EngineConfig:
     # Verification
     verify_after_each_section: bool = True
 
+    # Circuit breaker for layer cascade
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_reset_seconds: int = 300
+
+    # Parallel execution (opt-in)
+    parallel_execution: bool = False
+    max_workers: int = 4
+
     # Formula recalculation (requires LibreOffice — gracefully skipped if absent)
     recalculate_formulas: bool = True
     recalc_timeout: int = 30

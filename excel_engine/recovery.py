@@ -5,11 +5,13 @@ Provides:
   - TaskError: structured error record
   - ErrorClassifier: categorise exceptions as transient / permanent / layer_incompatible
   - RecoveryStrategy: decide whether to retry (with exponential back-off) or escalate
+  - CircuitBreaker: prevent repeated calls to a consistently-failing layer
 """
 
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass, field
 
 from excel_engine.config import Layer, TaskType
@@ -107,3 +109,65 @@ class RecoveryStrategy:
         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
         jitter = random.uniform(0, delay * 0.1)
         return delay + jitter
+
+
+# ── Circuit Breaker ──
+
+class CircuitBreaker:
+    """Prevent repeated calls to a consistently-failing layer.
+
+    States per layer:
+      - CLOSED (normal): requests pass through
+      - OPEN: layer has hit failure_threshold; requests are blocked
+      - HALF-OPEN: reset_timeout has elapsed since opening; one probe allowed
+
+    After a successful probe the breaker resets to CLOSED.
+    After a failed probe the breaker re-opens.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        reset_timeout: float = 300,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self.reset_timeout = reset_timeout
+        self._failures: dict[str, int] = {}       # layer_name -> consecutive failures
+        self._open_since: dict[str, float] = {}    # layer_name -> timestamp when opened
+        self._half_open: dict[str, bool] = {}      # layer_name -> currently probing
+
+    def record_failure(self, layer_name: str) -> None:
+        """Record a consecutive failure for *layer_name*."""
+        self._failures[layer_name] = self._failures.get(layer_name, 0) + 1
+        if self._failures[layer_name] >= self.failure_threshold:
+            self._open_since[layer_name] = time.time()
+            self._half_open[layer_name] = False
+
+    def record_success(self, layer_name: str) -> None:
+        """Reset failure count after a success."""
+        self._failures.pop(layer_name, None)
+        self._open_since.pop(layer_name, None)
+        self._half_open.pop(layer_name, None)
+
+    def is_open(self, layer_name: str) -> bool:
+        """Return True if the breaker is open (skip this layer).
+
+        If reset_timeout has elapsed, transition to half-open and allow
+        a single probe request (returns False once).
+        """
+        if layer_name not in self._open_since:
+            return False
+
+        elapsed = time.time() - self._open_since[layer_name]
+        if elapsed >= self.reset_timeout:
+            if not self._half_open.get(layer_name, False):
+                # Transition to half-open: allow one probe
+                self._half_open[layer_name] = True
+                return False
+        return True
+
+    def reset(self, layer_name: str) -> None:
+        """Manually reset a layer's circuit breaker."""
+        self._failures.pop(layer_name, None)
+        self._open_since.pop(layer_name, None)
+        self._half_open.pop(layer_name, None)

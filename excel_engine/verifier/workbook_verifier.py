@@ -9,6 +9,7 @@ Trained against 114+ SAM textbook checkpoints.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,6 +74,95 @@ def _normalize_formula(f: str) -> str:
         else:
             normalized.append(part)
     return "".join(normalized)
+
+
+def _expand_range(range_str: str) -> set[str]:
+    """Expand a range like 'A1:C3' into a set of cell references."""
+    from openpyxl.utils import range_boundaries
+    cells = set()
+    for part in range_str.replace(" ", "").split(","):
+        if ":" in part:
+            try:
+                min_col, min_row, max_col, max_row = range_boundaries(part)
+                from openpyxl.utils import get_column_letter
+                for r in range(min_row, max_row + 1):
+                    for c in range(min_col, max_col + 1):
+                        cells.add(f"{get_column_letter(c)}{r}")
+            except Exception:
+                cells.add(part)
+        else:
+            cells.add(part.upper())
+    return cells
+
+
+def _ranges_overlap(rule_range_str: str, expected_cells: set[str]) -> bool:
+    """Check whether a rule's range string overlaps with expected cells."""
+    rule_cells = _expand_range(rule_range_str)
+    return bool(rule_cells & expected_cells)
+
+
+_CROSS_SHEET_REF_RE = re.compile(
+    r"(?:^|[=(,+\-*/&: ])'?([A-Za-z][\w ]*?)'?!([A-Z]+\d+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_sheet_references(formula: str) -> list[tuple[str, str]]:
+    """Extract (sheet_name, cell_ref) pairs from a formula."""
+    return _CROSS_SHEET_REF_RE.findall(formula)
+
+
+def _get_chart_title_text(chart) -> str | None:
+    """Extract the plain-text title string from an openpyxl chart object."""
+    title_obj = getattr(chart, "title", None)
+    if title_obj is None:
+        return None
+    # Simple string case (before save/load)
+    if isinstance(title_obj, str):
+        return title_obj
+    # After save/load, title is a Title object with nested rich text
+    try:
+        text_obj = title_obj.text
+        if isinstance(text_obj, str):
+            return text_obj
+        # RichText: iterate paragraphs → runs
+        if hasattr(text_obj, "rich") and text_obj.rich:
+            parts = []
+            for p in text_obj.rich.p:
+                for r in (p.r or []):
+                    if r.t:
+                        parts.append(r.t)
+            if parts:
+                return "".join(parts)
+    except Exception:
+        pass
+    return None
+
+
+def _get_axis_title_text(axis) -> str | None:
+    """Extract the plain-text title string from a chart axis."""
+    if axis is None:
+        return None
+    title_obj = getattr(axis, "title", None)
+    if title_obj is None:
+        return None
+    if isinstance(title_obj, str):
+        return title_obj
+    try:
+        text_obj = title_obj.text
+        if isinstance(text_obj, str):
+            return text_obj
+        if hasattr(text_obj, "rich") and text_obj.rich:
+            parts = []
+            for p in text_obj.rich.p:
+                for r in (p.r or []):
+                    if r.t:
+                        parts.append(r.t)
+            if parts:
+                return "".join(parts)
+    except Exception:
+        pass
+    return None
 
 
 class WorkbookVerifier:
@@ -234,7 +324,10 @@ class WorkbookVerifier:
                 expected = _normalize_formula(task.formula)
                 exact_match = actual == expected
 
-                return VerificationResult(
+                # A4: Validate cross-sheet references (warnings only)
+                ref_warnings = self._check_cross_sheet_refs(cell_value)
+
+                result = VerificationResult(
                     task_id=task.id, task_type=task.task_type,
                     passed=exact_match,
                     message=(
@@ -248,6 +341,9 @@ class WorkbookVerifier:
                         "exact_match": exact_match,
                     },
                 )
+                if ref_warnings:
+                    result.details["cross_sheet_warnings"] = ref_warnings
+                return result
             else:
                 return VerificationResult(
                     task_id=task.id, task_type=task.task_type,
@@ -257,10 +353,15 @@ class WorkbookVerifier:
 
         # No expected formula — just check cell has a formula
         if cell_value.startswith("="):
-            return VerificationResult(
+            # A4: Validate cross-sheet references (warnings only)
+            ref_warnings = self._check_cross_sheet_refs(cell_value)
+            result = VerificationResult(
                 task_id=task.id, task_type=task.task_type,
                 passed=True, message=f"Formula found: {cell_value}",
             )
+            if ref_warnings:
+                result.details = {"cross_sheet_warnings": ref_warnings}
+            return result
 
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
@@ -286,6 +387,15 @@ class WorkbookVerifier:
 
         if task.value:
             matches = cell_value.strip().lower() == task.value.strip().lower()
+            if not matches:
+                # A1: Floating-point leniency — numeric fallback
+                try:
+                    actual_num = float(str(cell.value))
+                    expected_num = float(str(task.value))
+                    if math.isclose(actual_num, expected_num, rel_tol=1e-9, abs_tol=1e-12):
+                        matches = True
+                except (ValueError, TypeError):
+                    pass
             return VerificationResult(
                 task_id=task.id, task_type=task.task_type,
                 passed=matches,
@@ -474,7 +584,7 @@ class WorkbookVerifier:
         )
 
     def _verify_conditional_format(self, task: Task) -> VerificationResult:
-        """Verify conditional formatting rules exist."""
+        """Verify conditional formatting rules exist, with type & range matching."""
         ws = self._get_ws(task.sheet)
 
         cf_rules = ws.conditional_formatting
@@ -484,18 +594,56 @@ class WorkbookVerifier:
         if count > 0:
             rules_info = []
             for cf in cf_rules:
+                cf_range = str(cf.sqref) if hasattr(cf, 'sqref') else str(cf)
                 for rule in cf.rules:
                     rules_info.append({
                         "type": rule.type,
                         "priority": rule.priority,
-                        "range": str(cf),
+                        "range": cf_range,
                     })
             details["rules"] = rules_info
 
+        if count == 0:
+            return VerificationResult(
+                task_id=task.id, task_type=task.task_type,
+                passed=False,
+                message="No conditional formatting rules found",
+                details=details if details else None,
+            )
+
+        # A3: Check rule type match if specified
+        expected_type = task.params.get("rule_type")
+        expected_range = task.params.get("range") or task.range
+
+        type_ok = True
+        range_ok = True
+
+        if expected_type:
+            type_ok = any(
+                r["type"] and r["type"].lower() == expected_type.lower()
+                for r in details.get("rules", [])
+            )
+            details["type_match"] = type_ok
+
+        if expected_range:
+            expected_cells = _expand_range(expected_range)
+            range_ok = any(
+                _ranges_overlap(r["range"], expected_cells)
+                for r in details.get("rules", [])
+            )
+            details["range_match"] = range_ok
+
+        passed = type_ok and range_ok
+        messages = [f"{count} conditional formatting rule(s) found"]
+        if expected_type and not type_ok:
+            messages.append(f"No rule matching type '{expected_type}'")
+        if expected_range and not range_ok:
+            messages.append(f"No rule overlapping range '{expected_range}'")
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=count > 0,
-            message=f"{count} conditional formatting rule(s) found",
+            passed=passed,
+            message="; ".join(messages),
             details=details if details else None,
         )
 
@@ -931,7 +1079,7 @@ class WorkbookVerifier:
     # ══════════════════════════════════════════════════════════════════
 
     def _verify_chart(self, task: Task) -> VerificationResult:
-        """Verify a chart exists on the sheet, with type checking."""
+        """Verify a chart exists on the sheet, with type, title, legend, and series checks."""
         ws = self._get_ws(task.sheet)
         charts = ws._charts
 
@@ -942,14 +1090,89 @@ class WorkbookVerifier:
             )
 
         chart_types = []
+        details: dict[str, Any] = {"count": len(charts)}
+        checks_passed = True
+        messages = [f"{len(charts)} chart(s) found"]
+
         for chart in charts:
             chart_types.append(type(chart).__name__)
 
+        details["types"] = chart_types
+
+        # A2: Enhanced chart checks
+        expected_title = task.params.get("title")
+        check_legend = task.params.get("legend")
+        expected_series_count = task.params.get("series_count")
+        expected_x_axis = task.params.get("x_axis_title")
+        expected_y_axis = task.params.get("y_axis_title")
+
+        if expected_title is not None:
+            title_found = any(
+                _get_chart_title_text(c) is not None
+                and _get_chart_title_text(c).strip().lower() == str(expected_title).strip().lower()
+                for c in charts
+            )
+            details["title_match"] = title_found
+            if not title_found:
+                checks_passed = False
+                messages.append(f"Expected chart title '{expected_title}' not found")
+            else:
+                messages.append(f"Chart title '{expected_title}' found")
+
+        if check_legend is not None:
+            legend_found = any(getattr(c, "legend", None) is not None for c in charts)
+            details["legend_present"] = legend_found
+            if check_legend and not legend_found:
+                checks_passed = False
+                messages.append("Expected legend not found")
+            elif not check_legend and legend_found:
+                checks_passed = False
+                messages.append("Legend found but not expected")
+
+        # Always verify at least one series exists
+        max_series = max((len(getattr(c, "series", []) or []) for c in charts), default=0)
+        details["max_series_count"] = max_series
+        if max_series < 1:
+            checks_passed = False
+            messages.append("No data series found in any chart")
+
+        if expected_series_count is not None:
+            series_match = any(
+                len(getattr(c, "series", []) or []) == int(expected_series_count)
+                for c in charts
+            )
+            details["series_count_match"] = series_match
+            if not series_match:
+                checks_passed = False
+                messages.append(f"Expected {expected_series_count} series, found counts: {[len(getattr(c, 'series', []) or []) for c in charts]}")
+
+        if expected_x_axis is not None:
+            x_match = any(
+                _get_axis_title_text(getattr(c, "x_axis", None)) is not None
+                and _get_axis_title_text(c.x_axis).strip().lower() == str(expected_x_axis).strip().lower()
+                for c in charts
+            )
+            details["x_axis_match"] = x_match
+            if not x_match:
+                checks_passed = False
+                messages.append(f"Expected x-axis title '{expected_x_axis}' not found")
+
+        if expected_y_axis is not None:
+            y_match = any(
+                _get_axis_title_text(getattr(c, "y_axis", None)) is not None
+                and _get_axis_title_text(c.y_axis).strip().lower() == str(expected_y_axis).strip().lower()
+                for c in charts
+            )
+            details["y_axis_match"] = y_match
+            if not y_match:
+                checks_passed = False
+                messages.append(f"Expected y-axis title '{expected_y_axis}' not found")
+
         return VerificationResult(
             task_id=task.id, task_type=task.task_type,
-            passed=True,
-            message=f"{len(charts)} chart(s) found: {chart_types}",
-            details={"count": len(charts), "types": chart_types},
+            passed=checks_passed,
+            message="; ".join(messages),
+            details=details,
         )
 
     # ══════════════════════════════════════════════════════════════════
@@ -1165,6 +1388,32 @@ class WorkbookVerifier:
             passed=True,
             message=f"Skipped: {reason}",
         )
+
+    def _check_cross_sheet_refs(self, formula: str) -> list[str]:
+        """A4: Validate cross-sheet references in a formula. Returns warnings."""
+        if not self._wb:
+            return []
+        warnings = []
+        refs = _extract_sheet_references(formula)
+        for sheet_name, cell_ref in refs:
+            if sheet_name not in self._wb.sheetnames:
+                # Could be external workbook ref — warn but don't fail
+                msg = f"Referenced sheet '{sheet_name}' not found in workbook"
+                logger.warning(msg)
+                warnings.append(msg)
+            else:
+                try:
+                    ws = self._wb[sheet_name]
+                    cell_val = ws[cell_ref].value
+                    if cell_val is None:
+                        msg = f"Referenced cell {sheet_name}!{cell_ref} is empty"
+                        logger.warning(msg)
+                        warnings.append(msg)
+                except Exception as exc:
+                    msg = f"Error checking {sheet_name}!{cell_ref}: {exc}"
+                    logger.warning(msg)
+                    warnings.append(msg)
+        return warnings
 
     # ------------------------------------------------------------------
     # Standalone scanners (not tied to individual tasks)

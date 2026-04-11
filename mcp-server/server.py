@@ -96,6 +96,23 @@ def _engine_result_to_dict(result) -> dict[str, Any]:
     }
 
 
+def _make_progress_callback():
+    """Create a progress callback that logs task progress via the MCP logger."""
+    def callback(info: dict) -> None:
+        phase = info.get("phase", "unknown")
+        task_id = info.get("task", "?")
+        total = info.get("total", "?")
+        if phase == "executing":
+            logger.info("[progress] Executing task %s (of %s)", task_id, total)
+        elif phase == "completed":
+            success = info.get("success", False)
+            status = "✓" if success else "✗"
+            logger.info("[progress] %s Task %s (of %s)", status, task_id, total)
+        else:
+            logger.info("[progress] %s — task %s", phase, task_id)
+    return callback
+
+
 def _task_to_dict(t: Task) -> dict[str, Any]:
     """Convert a Task dataclass to a JSON-safe dict."""
     return {
@@ -154,7 +171,8 @@ def complete_assignment(
 
         logger.info("Starting assignment: %s with %s", wb.name, inst.name)
         engine = ExcelEngine(config=config)
-        result = engine.run(workbook=wb, instructions=inst)
+        progress_cb = _make_progress_callback()
+        result = engine.run(workbook=wb, instructions=inst, progress_callback=progress_cb)
 
         return json.dumps(_engine_result_to_dict(result), indent=2)
 

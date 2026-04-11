@@ -155,6 +155,26 @@ def _show_result(result: EngineResult) -> None:
             for ft in result.failed_tasks:
                 st.write(f"- {ft}")
 
+    # Formula recalculation results
+    if result.formula_errors is not None:
+        fe = result.formula_errors
+        if fe.skipped:
+            st.info(f"ℹ️ Formula recalculation skipped — {fe.warning}")
+        elif fe.total_errors > 0:
+            with st.expander(
+                f"⚠️ Formula Errors ({fe.total_errors} errors in "
+                f"{fe.total_formulas} formulas)",
+                expanded=True,
+            ):
+                for err_type, info in fe.error_summary.items():
+                    st.markdown(f"**{err_type}** — {info['count']} occurrences")
+                    for loc in info["locations"][:10]:
+                        st.write(f"&nbsp;&nbsp;• {loc}")
+        else:
+            st.success(
+                f"✅ Formulas OK — {fe.total_formulas} formulas, 0 errors"
+            )
+
 
 # ────────────────────────────────────────────────────────────────
 # Run button + progress

@@ -223,6 +223,10 @@ class EngineConfig:
     # Verification
     verify_after_each_section: bool = True
 
+    # Formula recalculation (requires LibreOffice — gracefully skipped if absent)
+    recalculate_formulas: bool = True
+    recalc_timeout: int = 30
+
     def get_layers_for_task(self, task_type: TaskType) -> list[Layer]:
         """Return the ordered list of layers that can handle a given task type."""
         candidates = TASK_LAYER_MAP.get(task_type, [])

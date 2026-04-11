@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from excel_engine.config import EngineConfig, TaskType, Layer
+from excel_engine.recalc import recalculate, RecalcResult
 from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError
 from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
 from excel_engine.layers.xlwings_layer import XlwingsLayer
@@ -55,6 +56,7 @@ class EngineResult:
     errors: list[str] = field(default_factory=list)
     task_errors: list[TaskError] = field(default_factory=list)
     failed_tasks: list[str] = field(default_factory=list)
+    formula_errors: Optional[RecalcResult] = None
     elapsed_seconds: float = 0.0
 
     def summary(self) -> str:
@@ -79,6 +81,19 @@ class EngineResult:
                 f"  Task errors: {len(self.task_errors)} "
                 f"(transient={transient}, permanent={permanent}, layer_incompatible={incompatible})"
             )
+        if self.formula_errors is not None:
+            fe = self.formula_errors
+            if fe.skipped:
+                lines.append(f"  Formula recalc: skipped ({fe.warning})")
+            elif fe.total_errors > 0:
+                lines.append(
+                    f"  Formula recalc: {fe.total_errors} errors in "
+                    f"{fe.total_formulas} formulas"
+                )
+                for err_type, info in fe.error_summary.items():
+                    lines.append(f"    {err_type}: {info['count']}")
+            else:
+                lines.append(f"  Formula recalc: OK ({fe.total_formulas} formulas)")
         return "\n".join(lines)
 
 
@@ -200,6 +215,34 @@ class ExcelEngine:
                 result.sections_completed == result.sections_total
                 and result.tasks_completed == result.tasks_total
             )
+
+            # ── Phase 4: RECALCULATE formulas (optional) ──
+            if self.config.recalculate_formulas and result.success:
+                logger.info("=" * 60)
+                logger.info("PHASE 4: RECALCULATE — LibreOffice formula recalculation")
+                logger.info("=" * 60)
+                try:
+                    recalc_result = recalculate(
+                        workbook, timeout=self.config.recalc_timeout
+                    )
+                    result.formula_errors = recalc_result
+                    if recalc_result.skipped:
+                        logger.info("Recalculation skipped: %s", recalc_result.warning)
+                    elif recalc_result.total_errors > 0:
+                        logger.warning(
+                            "Recalculation found %d formula errors",
+                            recalc_result.total_errors,
+                        )
+                    else:
+                        logger.info(
+                            "Recalculation OK — %d formulas, 0 errors",
+                            recalc_result.total_formulas,
+                        )
+                except Exception as e:
+                    logger.warning("Formula recalculation failed: %s", e)
+                    result.formula_errors = RecalcResult(
+                        success=False, warning=str(e)
+                    )
 
         except Exception as e:
             logger.exception("Execution failed: %s", e)

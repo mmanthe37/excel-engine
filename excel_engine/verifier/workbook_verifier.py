@@ -1165,3 +1165,92 @@ class WorkbookVerifier:
             passed=True,
             message=f"Skipped: {reason}",
         )
+
+    # ------------------------------------------------------------------
+    # Standalone scanners (not tied to individual tasks)
+    # ------------------------------------------------------------------
+
+    def verify_formula_errors(self) -> list[VerificationResult]:
+        """Scan all cells for Excel error values (#REF!, #DIV/0!, etc.).
+
+        Works with data_only=True workbook to see computed values.
+        Can detect errors even without LibreOffice recalculation if the
+        workbook was previously opened in Excel/Calc.
+        """
+        error_values = {
+            "#VALUE!", "#DIV/0!", "#REF!", "#NAME?", "#NULL!", "#NUM!", "#N/A",
+        }
+
+        wb_vals = self._wb_values
+        if wb_vals is None:
+            if self._path is None:
+                return [
+                    VerificationResult(
+                        task_id="formula_error_scan",
+                        task_type=TaskType.FORMULA,
+                        passed=True,
+                        message="No workbook path available; skipping formula error scan",
+                    )
+                ]
+            wb_vals = load_workbook(str(self._path), data_only=True)
+
+        results: list[VerificationResult] = []
+        sheets_with_errors: set[str] = set()
+
+        for sheet_name in wb_vals.sheetnames:
+            ws = wb_vals[sheet_name]
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        for err in error_values:
+                            if err in cell.value:
+                                sheets_with_errors.add(sheet_name)
+                                results.append(
+                                    VerificationResult(
+                                        task_id=f"formula_error_{sheet_name}_{cell.coordinate}",
+                                        task_type=TaskType.FORMULA,
+                                        passed=False,
+                                        message=f"Excel error {err} found at {sheet_name}!{cell.coordinate}",
+                                        details={
+                                            "error_type": err,
+                                            "location": f"{sheet_name}!{cell.coordinate}",
+                                            "cell_value": cell.value,
+                                        },
+                                    )
+                                )
+                                break  # one error per cell is enough
+
+        # Close if we opened a temporary workbook
+        if wb_vals is not self._wb_values:
+            wb_vals.close()
+
+        if not results:
+            results.append(
+                VerificationResult(
+                    task_id="formula_error_scan",
+                    task_type=TaskType.FORMULA,
+                    passed=True,
+                    message="No formula errors found",
+                )
+            )
+
+        logger.info(
+            "Formula error scan: %d errors found across %d sheets",
+            len(results) if not results[0].passed else 0,
+            len(sheets_with_errors),
+        )
+        return results
+
+    def count_formulas(self) -> int:
+        """Count total number of formula cells in the workbook."""
+        if not self._wb:
+            raise RuntimeError("No workbook loaded for verification")
+
+        count = 0
+        for sheet_name in self._wb.sheetnames:
+            ws = self._wb[sheet_name]
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        count += 1
+        return count

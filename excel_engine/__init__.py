@@ -15,14 +15,18 @@ __author__ = "Excel Engine Contributors"
 
 from excel_engine.engine import ExcelEngine, EngineResult
 from excel_engine.config import EngineConfig, TaskType, Layer
+from excel_engine.recalc import recalculate, scan_formula_errors, RecalcResult
 from excel_engine.parsers.task_extractor import Task
 from excel_engine.planner.task_planner import ExecutionPlan, Section
 from excel_engine.verifier.workbook_verifier import WorkbookVerifier, SectionVerification, VerificationResult
+from excel_engine.presets.financial import FinancialPreset, apply_financial_preset, apply_number_formats
 
 __all__ = [
     "ExcelEngine", "EngineResult", "EngineConfig",
     "TaskType", "Layer", "Task",
     "ExecutionPlan", "Section",
     "WorkbookVerifier", "SectionVerification", "VerificationResult",
+    "recalculate", "scan_formula_errors", "RecalcResult",
+    "FinancialPreset", "apply_financial_preset", "apply_number_formats",
     "__version__",
 ]

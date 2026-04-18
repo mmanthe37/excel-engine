@@ -142,6 +142,7 @@ class TestCmdRun:
         ns.config = kwargs.get("config", None)
         ns.phase = kwargs.get("phase", "both")
         ns.dry_run = kwargs.get("dry_run", False)
+        ns.watch = kwargs.get("watch", False)
         ns.output = kwargs.get("output", None)
         ns.verbose = False
         return ns
@@ -301,6 +302,32 @@ class TestCmdRun:
             rc = cmd_run(args)
             assert rc == 0
             assert out_file.exists()
+
+    def test_run_watch_passes_progress_callback(self, tmp_path):
+        wb = tmp_path / "test.xlsx"
+        wb.write_text("fake")
+        inst = tmp_path / "inst.txt"
+        inst.write_text("fake")
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.summary.return_value = "OK"
+        mock_result.workbook_path = wb
+        mock_result.sections_completed = 1
+        mock_result.sections_total = 1
+        mock_result.tasks_completed = 1
+        mock_result.tasks_total = 1
+        mock_result.elapsed_seconds = 1.0
+        mock_result.errors = []
+
+        with patch("excel_engine.engine.ExcelEngine") as MockEngine:
+            engine_inst = MockEngine.return_value
+            engine_inst.run.return_value = mock_result
+            args = self._make_args(workbook=str(wb), instructions=str(inst), watch=True)
+            rc = cmd_run(args)
+            assert rc == 0
+            _, kwargs = engine_inst.run.call_args
+            assert callable(kwargs["progress_callback"])
 
 
 # ── cmd_parse ──

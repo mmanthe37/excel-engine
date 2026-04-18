@@ -123,6 +123,13 @@ class TestCLIRun:
         data = json.loads(out.read_text())
         assert data["mode"] == "dry_run"
 
+    def test_run_watch_flag(self, cli_workbook, instructions_file):
+        result = _run_cli(
+            "run", str(cli_workbook), str(instructions_file),
+            "--dry-run", "--watch",
+        )
+        assert result.returncode == 0
+
 
 class TestCLIVerify:
     def test_verify_basic(self, cli_workbook):
@@ -160,6 +167,12 @@ class TestCLIParser:
         assert parser is not None
         args = parser.parse_args(["info"])
         assert args.command == "info"
+
+    def test_parser_run_watch_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "a.xlsx", "b.txt", "--watch", "--dry-run"])
+        assert args.command == "run"
+        assert args.watch is True
 
     def test_main_info(self):
         ret = main(["info"])

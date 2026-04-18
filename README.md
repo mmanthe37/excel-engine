@@ -198,6 +198,25 @@ excel-engine check-env
 
 # Enable verbose/debug output (works with any subcommand)
 excel-engine --verbose run assignment.xlsx instructions.docx
+
+# Real-time supervised run (task-by-task progress)
+excel-engine run assignment.xlsx instructions.docx --watch
+```
+
+### Copilot CLI Supervised Run (repo main)
+
+From a Copilot CLI session, use the repository wrapper so you always run the local
+`main` checkout (not an older global/venv install):
+
+```bash
+cd ~/Dev/excel-engine
+./copilot_excel_run.sh "/full/path/to/assignment.xlsx" "/full/path/to/instructions.docx"
+```
+
+You can pass any additional `excel-engine run` flags after the two paths:
+
+```bash
+./copilot_excel_run.sh "/path/assignment.xlsx" "/path/instructions.txt" --phase 1 --output run.json
 ```
 
 ### Python API

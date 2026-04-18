@@ -3,6 +3,7 @@ CLI — Standalone command-line interface for the Excel Engine.
 
 Usage:
     excel-engine run <workbook> <instructions>
+    excel-engine run <workbook> <instructions> --watch
     excel-engine parse <instructions>
     excel-engine verify <workbook>
     excel-engine info
@@ -19,7 +20,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import excel_engine
 from excel_engine.config import EngineConfig, Layer, TASK_LAYER_MAP
@@ -60,6 +61,44 @@ def _write_output(data: dict, output_path: Optional[str]) -> None:
         print(text)
 
 
+def _format_progress_line(event: dict) -> str:
+    """Render a single-line progress message from an engine callback event."""
+    phase = event.get("phase", "")
+    task_id = event.get("task", "?")
+    task_type = event.get("task_type", "")
+    section = event.get("section", "")
+    index = event.get("index")
+    total = event.get("total")
+
+    position = ""
+    if isinstance(index, int) and isinstance(total, int) and total > 0:
+        position = f" ({index + 1}/{total})"
+    elif isinstance(total, int) and total > 0:
+        position = f" (?/{total})"
+
+    context = f"[{section}] " if section else ""
+    task_label = f"{task_id}"
+    if task_type:
+        task_label = f"{task_id} ({task_type})"
+
+    if phase == "executing":
+        return f"▶ {context}{task_label}{position}"
+    if phase == "completed":
+        success = event.get("success")
+        icon = "✓" if success else "✗"
+        return f"{icon} {context}{task_label}{position}"
+    return ""
+
+
+def _build_progress_callback() -> Callable[[dict], None]:
+    """Build a stdout progress callback for real-time task monitoring."""
+    def _callback(event: dict) -> None:
+        line = _format_progress_line(event)
+        if line:
+            print(line, flush=True)
+    return _callback
+
+
 # ── Commands ──
 
 
@@ -97,6 +136,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Instructions: {instructions.name}")
     print()
 
+    watch_enabled = bool(getattr(args, "__dict__", {}).get("watch", False))
+    progress_callback = _build_progress_callback() if watch_enabled else None
+    if watch_enabled and not args.dry_run:
+        print("Live watch: enabled")
+        print()
+
     if args.dry_run:
         # Parse and plan only
         text = engine._parser.parse(instructions)
@@ -116,7 +161,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             }, args.output)
         return 0
 
-    result = engine.run(workbook=workbook, instructions=instructions)
+    result = engine.run(
+        workbook=workbook,
+        instructions=instructions,
+        progress_callback=progress_callback,
+    )
     print(result.summary())
 
     if args.output:
@@ -409,6 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  excel-engine run assignment.xlsx instructions.docx\n"
+            "  excel-engine run assignment.xlsx instructions.docx --watch\n"
             "  excel-engine parse instructions.rtfd --output tasks.json\n"
             "  excel-engine verify completed.xlsx\n"
             "  excel-engine info\n"
@@ -437,6 +487,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--phase", choices=["1", "2", "both"], default="both",
         help="Run specific phase: 1=openpyxl, 2=xlwings, both=full pipeline",
+    )
+    run_p.add_argument(
+        "--watch", action="store_true",
+        help="Show real-time per-task progress during execution",
     )
     run_p.add_argument("--config", help="Path to JSON config file")
     run_p.add_argument("--output", "-o", help="Write results to JSON file")

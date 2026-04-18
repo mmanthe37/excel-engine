@@ -359,7 +359,11 @@ class ExcelEngine:
                 if progress_callback:
                     progress_callback({
                         "phase": "executing",
+                        "status": "executing",
+                        "section": section.id,
+                        "section_name": section.name,
                         "task": task.id,
+                        "task_type": task.task_type.value,
                         "index": idx,
                         "total": total_tasks,
                     })
@@ -373,10 +377,15 @@ class ExcelEngine:
                     if progress_callback:
                         progress_callback({
                             "phase": "completed",
+                            "status": "completed",
+                            "section": section.id,
+                            "section_name": section.name,
                             "task": task.id,
+                            "task_type": task.task_type.value,
                             "index": idx,
                             "total": total_tasks,
                             "success": True,
+                            "passed": True,
                         })
                 else:
                     section_ok = False
@@ -387,10 +396,15 @@ class ExcelEngine:
                     if progress_callback:
                         progress_callback({
                             "phase": "completed",
+                            "status": "completed",
+                            "section": section.id,
+                            "section_name": section.name,
                             "task": task.id,
+                            "task_type": task.task_type.value,
                             "index": idx,
                             "total": total_tasks,
                             "success": False,
+                            "passed": False,
                         })
 
         # Verify section if configured
@@ -442,7 +456,11 @@ class ExcelEngine:
                 if progress_callback:
                     progress_callback({
                         "phase": "executing",
+                        "status": "executing",
+                        "section": section.id,
+                        "section_name": section.name,
                         "task": task.id,
+                        "task_type": task.task_type.value,
                         "total": total_tasks,
                     })
 
@@ -455,9 +473,14 @@ class ExcelEngine:
                     if progress_callback:
                         progress_callback({
                             "phase": "completed",
+                            "status": "completed",
+                            "section": section.id,
+                            "section_name": section.name,
                             "task": task.id,
+                            "task_type": task.task_type.value,
                             "total": total_tasks,
                             "success": True,
+                            "passed": True,
                         })
                 else:
                     group_ok = False
@@ -468,9 +491,14 @@ class ExcelEngine:
                     if progress_callback:
                         progress_callback({
                             "phase": "completed",
+                            "status": "completed",
+                            "section": section.id,
+                            "section_name": section.name,
                             "task": task.id,
+                            "task_type": task.task_type.value,
                             "total": total_tasks,
                             "success": False,
+                            "passed": False,
                         })
             return group_ok
 

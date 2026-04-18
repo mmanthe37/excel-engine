@@ -219,6 +219,9 @@ You can pass any additional `excel-engine run` flags after the two paths:
 ./copilot_excel_run.sh "/path/assignment.xlsx" "/path/instructions.txt" --phase 1 --output run.json
 ```
 
+By default, this wrapper also runs a final task-based verification pass. Add
+`--skip-verify` only if you explicitly want execution without the final check.
+
 ### Python API
 
 ```python

@@ -14,15 +14,19 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  ./copilot_excel_run.sh <workbook.xlsx> <instructions.(docx|rtfd|pdf|txt)> [extra args...]
+  ./copilot_excel_run.sh <workbook.xlsx> <instructions.(docx|rtfd|pdf|txt)> [extra run args...]
 
 Runs the local repo version of Excel Engine with:
   - repo venv activation
   - editable install check (ensures this repo code is active)
   - real-time watch output (--watch)
+  - post-run task-based verification (unless --skip-verify is passed)
 
 Any extra args are passed through to:
   excel-engine run <workbook> <instructions> --watch ...
+
+Special wrapper flag:
+  --skip-verify   Skip the final `excel-engine verify --instructions ...` pass
 EOF
 }
 
@@ -34,6 +38,16 @@ fi
 WORKBOOK="$1"
 INSTRUCTIONS="$2"
 shift 2
+
+SKIP_VERIFY=0
+RUN_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--skip-verify" ]]; then
+    SKIP_VERIFY=1
+  else
+    RUN_ARGS+=("$arg")
+  fi
+done
 
 if [[ ! -f "$WORKBOOK" ]]; then
   echo "Error: workbook not found: $WORKBOOK" >&2
@@ -82,4 +96,21 @@ echo "  Commit:  $COMMIT"
 echo "  Version: $VERSION"
 echo
 
-python -m excel_engine.cli run "$WORKBOOK" "$INSTRUCTIONS" --watch "$@"
+set +e
+python -m excel_engine.cli run "$WORKBOOK" "$INSTRUCTIONS" --watch "${RUN_ARGS[@]}"
+RUN_RC=$?
+set -e
+
+VERIFY_RC=0
+if [[ $SKIP_VERIFY -eq 0 ]]; then
+  echo
+  echo "Post-run verification"
+  set +e
+  python -m excel_engine.cli verify "$WORKBOOK" --instructions "$INSTRUCTIONS"
+  VERIFY_RC=$?
+  set -e
+fi
+
+if [[ $RUN_RC -ne 0 || $VERIFY_RC -ne 0 ]]; then
+  exit 1
+fi

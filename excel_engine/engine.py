@@ -876,6 +876,16 @@ class ExcelEngine:
                                 color=task.params.get("font_color"),
                             )
 
+        # Table style
+        elif tt == TaskType.TABLE_STYLE:
+            ws = self._openpyxl._ws(task.sheet)
+            style_name = task.style or task.params.get("style", "TableStyleMedium5")
+            table_name = task.params.get("table_name")
+            for table in ws.tables.values():
+                if not table_name or table.name == table_name:
+                    table.tableStyleInfo.name = style_name
+                    break
+
         else:
             raise NotImplementedError(
                 f"openpyxl handler not implemented for {tt.value}"
@@ -893,7 +903,13 @@ class ExcelEngine:
 
         tt = task.task_type
 
-        if tt == TaskType.FORMULA or tt == TaskType.CALCULATED_COLUMN:
+        if tt in (
+            TaskType.FORMULA, TaskType.CALCULATED_COLUMN,
+            TaskType.TEXT_FUNCTION, TaskType.LOOKUP_FUNCTION,
+            TaskType.FILTER_FUNCTION, TaskType.SORT_FUNCTION,
+            TaskType.UNIQUE_FUNCTION, TaskType.THREE_D_REFERENCE,
+            TaskType.EXTERNAL_REFERENCE,
+        ):
             if task.cell and task.formula:
                 self._xlwings.set_formula(task.cell, task.formula, sheet=task.sheet)
 
@@ -978,12 +994,73 @@ class ExcelEngine:
                 sheet=task.sheet,
             )
 
+        elif tt == TaskType.NAMED_RANGE:
+            name = task.params.get("name", task.value or "MyRange")
+            refers_to = task.params.get("refers_to", task.range or "A1")
+            self._xlwings.create_named_range(name, refers_to, sheet=task.sheet)
+
+        elif tt == TaskType.HYPERLINK:
+            url = task.params.get("url", task.value or "")
+            display = task.params.get("display_text", url)
+            self._xlwings.add_hyperlink(
+                task.cell or "A1", url, display_text=display, sheet=task.sheet,
+            )
+
+        elif tt == TaskType.SHEET_CREATE:
+            name = task.params.get("name", task.value or "NewSheet")
+            self._xlwings.add_sheet(name)
+
+        elif tt == TaskType.SHEET_RENAME:
+            old = task.params.get("old_name", task.sheet or "Sheet1")
+            new = task.params.get("new_name", task.value or "Renamed")
+            self._xlwings.rename_sheet(old, new)
+
+        elif tt == TaskType.SHEET_MOVE:
+            name = task.sheet or task.params.get("name", "Sheet1")
+            before = task.params.get("before")
+            after = task.params.get("after")
+            self._xlwings.move_sheet(name, before=before, after=after)
+
+        elif tt == TaskType.SHEET_COPY:
+            name = task.sheet or task.params.get("name", "Sheet1")
+            new_name = task.params.get("new_name")
+            self._xlwings.copy_sheet(name, new_name=new_name)
+
+        elif tt == TaskType.GOAL_SEEK:
+            self._xlwings.goal_seek(
+                target_cell=task.cell or task.params.get("target_cell", "A1"),
+                goal_value=task.params.get("goal_value", 0),
+                changing_cell=task.params.get("changing_cell", "B1"),
+                sheet=task.sheet,
+            )
+
+        elif tt == TaskType.SORT:
+            range_str = task.range or task.params.get("range", "A1:A1")
+            keys = task.params.get("keys", [])
+            self._xlwings.sort_range(range_str, keys, sheet=task.sheet)
+
+        elif tt == TaskType.TAB_COLOR:
+            color = task.params.get("color", task.value or "#FF0000")
+            sheet_name = task.sheet or "Sheet1"
+            self._xlwings.set_tab_color(sheet_name, color)
+
+        elif tt == TaskType.TABLE_TOTAL_ROW:
+            table_name = task.params.get("table_name", "Table1")
+            show = task.params.get("show", True)
+            self._xlwings.set_table_total_row(table_name, show, sheet=task.sheet)
+
+        elif tt == TaskType.FORMATTING:
+            if task.cell or task.range:
+                ref = task.range or task.cell
+                self._xlwings.apply_formatting(ref, task.params, sheet=task.sheet)
+
         else:
             raise NotImplementedError(
                 f"xlwings handler not implemented for {tt.value}"
             )
 
-        # Copy back if we used a desktop copy
+        # Save and copy back if we used a desktop copy
+        self._xlwings.save()
         if safe_path != workbook:
             self.path_handler.copy_back_from_desktop(safe_path, workbook)
 
@@ -991,7 +1068,13 @@ class ExcelEngine:
         """Execute a task via Layer 3 (AppleScript)."""
         tt = task.task_type
 
-        if tt == TaskType.FORMULA or tt == TaskType.CALCULATED_COLUMN:
+        if tt in (
+            TaskType.FORMULA, TaskType.CALCULATED_COLUMN,
+            TaskType.TEXT_FUNCTION, TaskType.LOOKUP_FUNCTION,
+            TaskType.FILTER_FUNCTION, TaskType.SORT_FUNCTION,
+            TaskType.UNIQUE_FUNCTION, TaskType.THREE_D_REFERENCE,
+            TaskType.EXTERNAL_REFERENCE,
+        ):
             if task.cell and task.formula:
                 self._applescript.set_cell_formula(
                     task.cell, task.formula, sheet=task.sheet,
@@ -1126,11 +1209,16 @@ class ExcelEngine:
     # ── Utility Methods ──
 
     def _save_workbook(self, workbook: Path) -> None:
-        """Save via the best available method."""
-        if self._openpyxl.wb:
-            self._openpyxl.save(workbook)
-        elif self._xlwings._wb:
+        """Save via the best available method.
+
+        Prefer xlwings when connected — it holds the live Excel state and is
+        more likely to reflect the latest edits than the in-memory openpyxl
+        workbook which may be stale after live-layer execution.
+        """
+        if self._xlwings._wb:
             self._xlwings.save()
+        elif self._openpyxl.wb:
+            self._openpyxl.save(workbook)
         else:
             try:
                 self._applescript.save()

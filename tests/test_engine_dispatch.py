@@ -490,3 +490,118 @@ class TestEnginePublicAPI:
         assert engine.planner is engine._planner
         assert engine.verifier is engine._verifier
         assert engine.extractor is engine._extractor
+
+
+# ══════════════════════════════════════════════════════════════════
+# Dispatcher parity test — every config mapping must have a handler
+# ══════════════════════════════════════════════════════════════════
+
+class TestDispatcherParity:
+    """Every TaskType→Layer mapping in config must have a dispatcher handler."""
+
+    # Layer.PYAUTOGUI is intentionally stubbed — it's last-resort
+    INTENTIONALLY_STUBBED = {Layer.PYAUTOGUI}
+
+    @pytest.fixture
+    def engine(self):
+        return ExcelEngine(EngineConfig())
+
+    def test_every_config_mapping_has_dispatcher_handler(self, engine, sample_workbook):
+        """For every (TaskType, Layer) pair in TASK_LAYER_MAP, calling the
+        dispatcher must NOT raise NotImplementedError.
+
+        We create a minimal task and call the dispatcher; any handler that
+        raises NotImplementedError means config promises something the engine
+        can't deliver.
+        """
+        from excel_engine.config import TASK_LAYER_MAP
+
+        missing: list[str] = []
+
+        for task_type, layers in TASK_LAYER_MAP.items():
+            for layer in layers:
+                if layer in self.INTENTIONALLY_STUBBED:
+                    continue
+
+                task = _make_task(
+                    task_type,
+                    cell="A1",
+                    formula="=1",
+                    value="1",
+                    range="A1:B10",
+                    sheet="Sheet1",
+                    style="TableStyleMedium5",
+                    params={
+                        "name": "TestName",
+                        "refers_to": "A1",
+                        "url": "https://example.com",
+                        "display_text": "Example",
+                        "old_name": "Sheet1",
+                        "new_name": "Renamed",
+                        "target_cell": "A1",
+                        "goal_value": 100,
+                        "changing_cell": "B1",
+                        "color": "#FF0000",
+                        "table_name": "Table1",
+                        "show": True,
+                        "source_sheet": "Sheet1",
+                        "source_range": "A1:B10",
+                        "dest_sheet": "PivotSheet",
+                        "pivot_table_name": "PivotTable1",
+                        "chart_type": "xlColumnClustered",
+                        "data_range": "A1:B10",
+                        "location_range": "N2",
+                        "keys": [],
+                        "criteria": "*",
+                        "field": 1,
+                        "group_by": 1,
+                        "function": -4157,
+                        "total_list": [2],
+                        "format": "$#,##0.00",
+                        "column": "A",
+                        "width": 12,
+                        "row": 2,
+                        "col": 1,
+                    },
+                )
+
+                try:
+                    # For openpyxl, we need an open workbook
+                    if layer == Layer.OPENPYXL:
+                        engine._openpyxl.open(sample_workbook)
+                        try:
+                            engine._dispatch_task(task, layer, sample_workbook)
+                        finally:
+                            engine._openpyxl.close()
+                    else:
+                        # For live layers (xlwings, AppleScript, etc.) we mock
+                        # the handler to test it doesn't raise NotImplementedError
+                        # but don't actually call the live API
+                        dispatch_map = {
+                            Layer.OPENPYXL: engine._exec_openpyxl,
+                            Layer.XLWINGS: engine._exec_xlwings,
+                            Layer.APPLESCRIPT: engine._exec_applescript,
+                            Layer.SYSTEM_EVENTS: engine._exec_system_events,
+                            Layer.VBA: engine._exec_vba,
+                            Layer.PYAUTOGUI: engine._exec_pyautogui,
+                        }
+                        handler = dispatch_map[layer]
+                        # We just need to verify NotImplementedError isn't raised
+                        # before any real API call. Patch xlwings/applescript internals.
+                        try:
+                            handler(task, sample_workbook)
+                        except NotImplementedError:
+                            missing.append(f"{task_type.value} → {layer.name}")
+                        except Exception:
+                            # Other exceptions are fine — means the handler exists
+                            # but needs a real environment (Excel, macOS, etc.)
+                            pass
+                except NotImplementedError:
+                    missing.append(f"{task_type.value} → {layer.name}")
+                except Exception:
+                    pass  # Real execution errors are expected without Excel running
+
+        assert not missing, (
+            f"Config maps these TaskType→Layer pairs but dispatcher raises "
+            f"NotImplementedError:\n  " + "\n  ".join(missing)
+        )

@@ -443,9 +443,9 @@ _FORMULA_REF = re.compile(
     re.I,
 )
 
-# Value extraction: "enter the value 42" / "type Michael Manthe"
+# Value extraction: "enter the value 42" / "type Michael Manthe" / "enter the text "Total""
 _VALUE_REF = re.compile(
-    r"(?:enter|type|input)\s+(?:the\s+)?(?:value\s+)?[\"'](.+?)[\"']",
+    r"(?:enter|type|input)\s+(?:the\s+)?(?:(?:value|text|label|word|string|number)\s+)?(?P<q>[\"'])(.+?)(?P=q)",
     re.I,
 )
 
@@ -679,20 +679,25 @@ class TaskExtractor:
         # ── Extract value ──
         val_match = _VALUE_REF.search(line)
         if val_match:
-            task.value = val_match.group(1)
+            task.value = val_match.group(2)
 
         # ── Extract bare numeric value for CELL_VALUE tasks ──  (P2-14)
         # First try the original bare_num pattern (preserves commas as-is).
         # Then fall back to the expanded extractor for %, $, scientific, parens.
+        # Strip only destination clause (e.g. "in cell E1") to avoid
+        # removing literal values that look like cell refs ("Type A1 in cell B1").
         if task_type == TaskType.CELL_VALUE and not task.value:
+            line_no_cells = re.sub(
+                r"\b(?:in(?:to)?|at|on)\s+(?:cell\s+)?[A-Z]{1,3}\d{1,7}\b", "", line, flags=re.I,
+            )
             bare_num = re.search(
                 r"(?:enter|type|input|put)\s+(?:the\s+)?(?:number\s+)?(\d[\d,.]*)",
-                line, re.I,
+                line_no_cells, re.I,
             )
             if bare_num:
                 task.value = bare_num.group(1)
             else:
-                expanded = extract_numeric_value(line)
+                expanded = extract_numeric_value(line_no_cells)
                 if expanded:
                     task.value = expanded
 

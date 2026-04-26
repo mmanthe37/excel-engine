@@ -380,3 +380,167 @@ class XlwingsLayer:
         if self._wb:
             self._wb.save()
             logger.info("Saved workbook via xlwings")
+
+    # ── Named Range Creation ──
+
+    def create_named_range(
+        self, name: str, refers_to: str, sheet: Optional[str] = None,
+    ) -> None:
+        """Create a workbook-scoped named range."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        ws = self._ws(sheet)
+        ref_range = ws.range(refers_to)
+        self._wb.names.add(name, f"={ws.name}!{ref_range.address}")
+        logger.info("Created named range '%s' → %s", name, refers_to)
+
+    # ── Hyperlinks ──
+
+    def add_hyperlink(
+        self,
+        cell: str,
+        url: str,
+        display_text: Optional[str] = None,
+        sheet: Optional[str] = None,
+    ) -> None:
+        """Add a hyperlink to a cell."""
+        self._require_xlwings()
+        ws = self._ws(sheet)
+        rng = ws.range(cell)
+        rng.add_hyperlink(url, text_to_display=display_text or url)
+        logger.info("Added hyperlink at %s → %s", cell, url)
+
+    # ── Sheet Operations ──
+
+    def add_sheet(self, name: str, before: Optional[str] = None, after: Optional[str] = None) -> None:
+        """Add a new sheet."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        kwargs: dict[str, Any] = {"name": name}
+        if before:
+            kwargs["before"] = self._wb.sheets[before]
+        elif after:
+            kwargs["after"] = self._wb.sheets[after]
+        self._wb.sheets.add(**kwargs)
+        logger.info("Added sheet '%s'", name)
+
+    def rename_sheet(self, old_name: str, new_name: str) -> None:
+        """Rename a sheet."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        self._wb.sheets[old_name].name = new_name
+        logger.info("Renamed sheet '%s' → '%s'", old_name, new_name)
+
+    def move_sheet(
+        self, sheet_name: str, before: Optional[str] = None, after: Optional[str] = None,
+    ) -> None:
+        """Move a sheet before/after another sheet."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        sheet = self._wb.sheets[sheet_name]
+        if before:
+            sheet.api.move(before=self._wb.sheets[before].api)
+        elif after:
+            sheet.api.move(after=self._wb.sheets[after].api)
+        logger.info("Moved sheet '%s'", sheet_name)
+
+    def copy_sheet(self, sheet_name: str, new_name: Optional[str] = None) -> None:
+        """Copy a sheet within the same workbook."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        sheet = self._wb.sheets[sheet_name]
+        sheet.api.copy(after=sheet.api)
+        if new_name:
+            self._wb.sheets[sheet.name + " (2)"].name = new_name
+        logger.info("Copied sheet '%s'", sheet_name)
+
+    # ── Goal Seek ──
+
+    def goal_seek(
+        self,
+        target_cell: str,
+        goal_value: float,
+        changing_cell: str,
+        sheet: Optional[str] = None,
+    ) -> None:
+        """Run Goal Seek on a target cell."""
+        self._require_xlwings()
+        ws = self._ws(sheet)
+        target_rng = ws.range(target_cell)
+        changing_rng = ws.range(changing_cell)
+        target_rng.api.goal_seek(goal=goal_value, changing_cell=changing_rng.api)
+        logger.info("Goal Seek: %s → %s (changing %s)", target_cell, goal_value, changing_cell)
+
+    # ── Sort ──
+
+    def sort_range(
+        self, range_str: str, keys: list[dict], sheet: Optional[str] = None,
+    ) -> None:
+        """Sort a range using xlwings API."""
+        self._require_xlwings()
+        ws = self._ws(sheet)
+        rng = ws.range(range_str)
+        if keys:
+            key1_ref = ws.range(keys[0].get("cell", "A1"))
+            order = 1 if keys[0].get("ascending", True) else 2
+            rng.api.sort(key1=key1_ref.api, order1=order, header=1)
+        else:
+            rng.api.sort(key1=rng.api, order1=1, header=1)
+        logger.info("Sorted range %s", range_str)
+
+    # ── Tab Color ──
+
+    def set_tab_color(self, sheet_name: str, color: str) -> None:
+        """Set the tab color of a sheet (hex string like '#FF0000')."""
+        self._require_xlwings()
+        if not self._wb:
+            raise RuntimeError("Not connected")
+        sheet = self._wb.sheets[sheet_name]
+        # Convert hex to RGB int for macOS Excel COM
+        hex_clean = color.lstrip("#")
+        r, g, b = int(hex_clean[0:2], 16), int(hex_clean[2:4], 16), int(hex_clean[4:6], 16)
+        sheet.api.tab.color.set(r + g * 256 + b * 65536)
+        logger.info("Set tab color of '%s' to %s", sheet_name, color)
+
+    # ── Table Total Row ──
+
+    def set_table_total_row(
+        self, table_name: str, show: bool = True, sheet: Optional[str] = None,
+    ) -> None:
+        """Show or hide the Total Row on a table."""
+        self._require_xlwings()
+        ws = self._ws(sheet or "Sheet1")
+        for table in ws.api.list_objects():
+            if table.name() == table_name:
+                table.show_totals.set(show)
+                logger.info("Table '%s' total row: %s", table_name, show)
+                return
+        raise ValueError(f"Table '{table_name}' not found")
+
+    # ── Generic Formatting ──
+
+    def apply_formatting(
+        self, ref: str, params: dict, sheet: Optional[str] = None,
+    ) -> None:
+        """Apply formatting from task params to a range via xlwings."""
+        self._require_xlwings()
+        ws = self._ws(sheet)
+        rng = ws.range(ref)
+        if "bold" in params:
+            rng.font.bold = params["bold"]
+        if "italic" in params:
+            rng.font.italic = params["italic"]
+        if "font_size" in params:
+            rng.font.size = params["font_size"]
+        if "font_color" in params:
+            rng.font.color = params["font_color"]
+        if "fill_color" in params:
+            rng.color = params["fill_color"]
+        if "number_format" in params:
+            rng.number_format = params["number_format"]
+        logger.info("Applied formatting to %s", ref)

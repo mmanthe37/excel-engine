@@ -111,7 +111,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.EXTERNAL_REFERENCE:  [Layer.XLWINGS, Layer.APPLESCRIPT],    # external links — live only
 
     # ── Tables ──
-    TaskType.TABLE_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.TABLE_CREATE:        [Layer.OPENPYXL],
     TaskType.TABLE_STYLE:         [Layer.OPENPYXL, Layer.SYSTEM_EVENTS],
     TaskType.TABLE_TOTAL_ROW:     [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.CALCULATED_COLUMN:   [Layer.XLWINGS, Layer.APPLESCRIPT],    # structural refs need LIVE
@@ -132,16 +132,16 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     # ── View & Layout ──
     TaskType.FREEZE_PANES:        [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.SPLIT_PANES:         [Layer.XLWINGS],
-    TaskType.PAGE_BREAK:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.PAGE_BREAK:          [Layer.OPENPYXL],
     TaskType.PRINT_SETTINGS:      [Layer.OPENPYXL],
 
     # ── Data Tools ──
     TaskType.AUTOFILTER:          [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.ADVANCED_FILTER:     [Layer.XLWINGS],
     TaskType.SORT:                [Layer.APPLESCRIPT, Layer.XLWINGS],
-    TaskType.SUBTOTAL:            [Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.SUBTOTAL:            [Layer.XLWINGS],
     TaskType.DATA_VALIDATION:     [Layer.OPENPYXL],
-    TaskType.GOAL_SEEK:           [Layer.XLWINGS, Layer.APPLESCRIPT],    # live Excel required
+    TaskType.GOAL_SEEK:           [Layer.XLWINGS],                     # live Excel required
 
     # ── Charts ──
     TaskType.CHART_BAR:           [Layer.OPENPYXL],
@@ -166,7 +166,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.SHEET_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_RENAME:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_MOVE:          [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.SHEET_COPY:          [Layer.OPENPYXL, Layer.APPLESCRIPT, Layer.XLWINGS],    # openpyxl can copy_worksheet
+    TaskType.SHEET_COPY:          [Layer.OPENPYXL, Layer.XLWINGS],
 
     # ── File Operations ──
     TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],

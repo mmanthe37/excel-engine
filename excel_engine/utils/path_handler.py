@@ -1,34 +1,49 @@
 """
-Path handling utilities — colons, special characters, Desktop copy workaround.
+Path handling utilities — colons, spaces, special characters, Desktop copy workaround.
 
-Key rule: colons in macOS paths break xlwings. The workaround is to copy
-the file to ~/Desktop before opening with xlwings, then copy back.
+Key rule: colons AND spaces in macOS paths break xlwings (Apple Events).
+The workaround is to copy the file to ~/Desktop before opening with xlwings,
+then copy back.
 """
 
 from __future__ import annotations
 
+import logging
 import shutil
 import re
+import zipfile
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Minimum set of files required in a valid OOXML (.xlsx) archive
+REQUIRED_OOXML_FILES = frozenset({
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "xl/workbook.xml",
+    "xl/_rels/workbook.xml.rels",
+})
 
 
 class PathHandler:
     """Safe path operations for Excel files on macOS."""
 
-    UNSAFE_CHARS_PATTERN = re.compile(r"[:]")
+    # Colons break xlwings Apple Events; spaces cause OSERROR -50
+    UNSAFE_CHARS_PATTERN = re.compile(r"[: ]")
 
     def __init__(self, desktop_path: Optional[Path] = None) -> None:
         self.desktop_path = desktop_path or Path.home() / "Desktop"
 
     def has_unsafe_chars(self, path: Path) -> bool:
-        """Check if a path contains characters that break xlwings (colons)."""
+        """Check if a path contains characters that break xlwings."""
         return bool(self.UNSAFE_CHARS_PATTERN.search(str(path)))
 
     def safe_copy_for_xlwings(self, src: Path) -> Path:
         """
-        Copy a file to ~/Desktop if its path contains colons.
-        Returns the safe path (may be the original if no copy needed).
+        Copy a file to ~/Desktop if its path contains unsafe characters
+        (colons or spaces). Returns the safe path (may be the original
+        if no copy needed).
         """
         if not self.has_unsafe_chars(src):
             return src
@@ -40,6 +55,7 @@ class PathHandler:
             dest = self._unique_path(dest)
 
         shutil.copy2(str(src), str(dest))
+        logger.info("Copied to safe xlwings path: %s → %s", src.name, dest)
         return dest
 
     def copy_back_from_desktop(self, desktop_file: Path, original: Path) -> None:
@@ -55,7 +71,7 @@ class PathHandler:
     @staticmethod
     def sanitize_filename(name: str) -> str:
         """Remove or replace characters problematic for xlwings paths."""
-        return name.replace(":", "_").replace("/", "_")
+        return name.replace(":", "_").replace("/", "_").replace(" ", "_")
 
     @staticmethod
     def _unique_path(path: Path) -> Path:
@@ -90,3 +106,51 @@ class PathHandler:
         if path.suffix.lower() not in (".xlsx", ".xlsm", ".xls"):
             return path.with_suffix(".xlsx")
         return path
+
+    # ── OOXML Validation ──
+
+    @staticmethod
+    def validate_ooxml(path: Path) -> tuple[bool, str]:
+        """
+        Validate that a file is a well-formed OOXML (.xlsx) archive.
+
+        Returns (ok, message). If ok is False, the file should not be opened
+        by openpyxl or used as a data source.
+        """
+        if not path.exists():
+            return False, f"File does not exist: {path}"
+
+        try:
+            with zipfile.ZipFile(str(path)) as zf:
+                names = set(zf.namelist())
+                missing = REQUIRED_OOXML_FILES - names
+                if missing:
+                    return False, (
+                        f"Invalid OOXML — missing required files: "
+                        f"{', '.join(sorted(missing))}"
+                    )
+            return True, "OK"
+        except zipfile.BadZipFile as e:
+            return False, f"Not a valid ZIP archive: {e}"
+        except Exception as e:
+            return False, f"Cannot read file: {e}"
+
+    @staticmethod
+    def create_backup(path: Path) -> Path:
+        """
+        Create a uniquely-named backup of a workbook before modification.
+
+        Returns the backup path. Never overwrites an existing backup.
+        """
+        backup = path.with_suffix(path.suffix + ".bak")
+        if backup.exists():
+            stem = backup.stem  # e.g., "file.xlsx"
+            suffix = ".bak"
+            parent = backup.parent
+            counter = 1
+            while backup.exists():
+                backup = parent / f"{stem}.{counter}{suffix}"
+                counter += 1
+        shutil.copy2(str(path), str(backup))
+        logger.info("Created backup: %s", backup.name)
+        return backup

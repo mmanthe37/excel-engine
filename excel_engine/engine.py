@@ -18,6 +18,7 @@ Protocol v2.0:
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -141,6 +142,11 @@ class ExcelEngine:
             reset_timeout=self.config.circuit_breaker_reset_seconds,
         )
 
+        # Cached xlwings safe path — created once per session, reused for all
+        # xlwings tasks, cleaned up at end.
+        self._xlwings_safe_path: Optional[Path] = None
+        self._backup_path: Optional[Path] = None
+
         # Layer lookup
         self._layers = {
             Layer.OPENPYXL: self._openpyxl,
@@ -195,11 +201,41 @@ class ExcelEngine:
 
     # ── Main Entry Point ──
 
+    def _prepare_workbook(self, workbook: Path) -> Path:
+        """
+        Pre-flight checks and backup before any modifications.
+
+        1. Resolve the path
+        2. Validate OOXML structure (catches already-corrupted files)
+        3. Create a uniquely-named backup
+
+        Returns the resolved workbook path.
+        Raises ValueError if the file is invalid.
+        """
+        workbook = Path(workbook).resolve()
+
+        if not workbook.exists():
+            raise FileNotFoundError(f"Workbook not found: {workbook}")
+
+        # ── Pre-flight OOXML validation ──
+        ok, msg = PathHandler.validate_ooxml(workbook)
+        if not ok:
+            raise ValueError(
+                f"Pre-flight validation failed for {workbook.name}: {msg}. "
+                f"The file may be corrupted or in an unsupported format."
+            )
+        logger.info("Pre-flight validation passed: %s", workbook.name)
+
+        # ── Backup before modification ──
+        self._backup_path = PathHandler.create_backup(workbook)
+
+        return workbook
+
     def execute(self, plan: ExecutionPlan, workbook: Path,
                 progress_callback: Optional[Callable[[dict], None]] = None) -> EngineResult:
         """Execute a pre-built plan against a workbook."""
         start_time = time.time()
-        workbook = Path(workbook).resolve()
+        workbook = self._prepare_workbook(workbook)
 
         result = EngineResult(
             success=False,
@@ -893,7 +929,10 @@ class ExcelEngine:
 
     def _exec_xlwings(self, task: Task, workbook: Path) -> None:
         """Execute a task via Layer 2 (xlwings)."""
-        safe_path = self.path_handler.safe_copy_for_xlwings(workbook)
+        # Use cached safe path — create once per session, reuse for all tasks
+        if self._xlwings_safe_path is None:
+            self._xlwings_safe_path = self.path_handler.safe_copy_for_xlwings(workbook)
+        safe_path = self._xlwings_safe_path
 
         if not self._xlwings._wb:
             MacUtils.launch_excel()
@@ -1059,10 +1098,17 @@ class ExcelEngine:
                 f"xlwings handler not implemented for {tt.value}"
             )
 
-        # Save and copy back if we used a desktop copy
+        # Save xlwings state; copy back validated result if using desktop copy
         self._xlwings.save()
         if safe_path != workbook:
-            self.path_handler.copy_back_from_desktop(safe_path, workbook)
+            ok, msg = PathHandler.validate_ooxml(safe_path)
+            if ok:
+                self.path_handler.copy_back_from_desktop(safe_path, workbook)
+            else:
+                logger.warning(
+                    "Post-save validation failed for xlwings copy: %s — "
+                    "NOT copying back to prevent corruption", msg,
+                )
 
     def _exec_applescript(self, task: Task, workbook: Path) -> None:
         """Execute a task via Layer 3 (AppleScript)."""
@@ -1214,9 +1260,25 @@ class ExcelEngine:
         Prefer xlwings when connected — it holds the live Excel state and is
         more likely to reflect the latest edits than the in-memory openpyxl
         workbook which may be stale after live-layer execution.
+
+        After saving, validates the file is still valid OOXML.  If the save
+        corrupted the file and a backup exists, the backup is restored.
         """
         if self._xlwings._wb:
             self._xlwings.save()
+            # If using a desktop copy, copy back with validation
+            if self._xlwings_safe_path and self._xlwings_safe_path != workbook:
+                ok, msg = PathHandler.validate_ooxml(self._xlwings_safe_path)
+                if ok:
+                    self.path_handler.copy_back_from_desktop(
+                        self._xlwings_safe_path, workbook,
+                    )
+                else:
+                    logger.error(
+                        "Post-save xlwings file is corrupt: %s — restoring backup", msg
+                    )
+                    self._restore_backup(workbook)
+                    return
         elif self._openpyxl.wb:
             self._openpyxl.save(workbook)
         else:
@@ -1225,8 +1287,22 @@ class ExcelEngine:
             except Exception:
                 logger.warning("Could not save workbook")
 
+        # Post-save integrity check
+        ok, msg = PathHandler.validate_ooxml(workbook)
+        if not ok:
+            logger.error("Post-save validation FAILED: %s — restoring backup", msg)
+            self._restore_backup(workbook)
+
+    def _restore_backup(self, workbook: Path) -> None:
+        """Restore the original file from backup if available."""
+        if self._backup_path and self._backup_path.exists():
+            shutil.copy2(str(self._backup_path), str(workbook))
+            logger.info("Restored workbook from backup: %s", self._backup_path.name)
+        else:
+            logger.error("No backup available to restore!")
+
     def _cleanup(self) -> None:
-        """Clean up all layer connections."""
+        """Clean up all layer connections and temporary files."""
         try:
             self._openpyxl.close()
         except Exception as e:
@@ -1239,6 +1315,17 @@ class ExcelEngine:
             self._verifier.close()
         except Exception as e:
             logger.warning("Cleanup failed for verifier: %s", e)
+
+        # Clean up xlwings desktop copy
+        if self._xlwings_safe_path is not None:
+            try:
+                self.path_handler.cleanup_desktop_copy(
+                    self._xlwings_safe_path,
+                    Path(self._xlwings_safe_path),  # any non-equal Path triggers cleanup
+                )
+            except Exception as e:
+                logger.warning("Cleanup failed for xlwings desktop copy: %s", e)
+            self._xlwings_safe_path = None
 
     # ── Convenience Methods ──
 

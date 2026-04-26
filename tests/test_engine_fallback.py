@@ -1038,6 +1038,13 @@ class TestExecuteSection:
 
 
 class TestEngineExecuteRecalc:
+    @staticmethod
+    def _make_xlsx(path):
+        """Create a minimal valid xlsx for tests that only exercise higher-level logic."""
+        from openpyxl import Workbook
+        wb = Workbook()
+        wb.save(str(path))
+
     @patch("time.sleep")
     def test_recalc_skipped_when_disabled(self, mock_sleep, tmp_path):
         config = EngineConfig(
@@ -1047,6 +1054,7 @@ class TestEngineExecuteRecalc:
         engine = ExcelEngine(config=config)
         plan = MagicMock(sections=[], section_count=0, total_tasks=0)
         wb = tmp_path / "test.xlsx"
+        self._make_xlsx(wb)
 
         with patch("excel_engine.engine.recalculate") as mock_recalc:
             result = engine.execute(plan, wb)
@@ -1063,6 +1071,7 @@ class TestEngineExecuteRecalc:
         engine = ExcelEngine(config=config)
         plan = MagicMock(sections=[], section_count=0, total_tasks=0)
         wb = tmp_path / "test.xlsx"
+        self._make_xlsx(wb)
 
         recalc_result = RecalcResult(success=True, total_formulas=5, total_errors=0)
         with patch("excel_engine.engine.recalculate", return_value=recalc_result), \
@@ -1081,6 +1090,7 @@ class TestEngineExecuteRecalc:
         engine = ExcelEngine(config=config)
         plan = MagicMock(sections=[], section_count=0, total_tasks=0)
         wb = tmp_path / "test.xlsx"
+        self._make_xlsx(wb)
 
         with patch("excel_engine.engine.recalculate", side_effect=Exception("boom")), \
              patch.object(engine, "_cleanup"):

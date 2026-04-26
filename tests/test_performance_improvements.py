@@ -155,9 +155,10 @@ class TestProgressCallback:
         )
         return plan, config
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/workbook.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_progress_callback_called(self, mock_cleanup, mock_dispatch):
+    def test_progress_callback_called(self, mock_cleanup, mock_dispatch, mock_prep):
         """Progress callback receives executing + completed for each task."""
         plan, config = self._make_plan_and_config(2)
         engine = ExcelEngine(config=config)
@@ -170,9 +171,10 @@ class TestProgressCallback:
         phases = [c.args[0]["phase"] for c in cb.call_args_list]
         assert phases == ["executing", "completed", "executing", "completed"]
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/workbook.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_progress_callback_data_shape(self, mock_cleanup, mock_dispatch):
+    def test_progress_callback_data_shape(self, mock_cleanup, mock_dispatch, mock_prep):
         """Progress callback dict contains expected keys."""
         plan, config = self._make_plan_and_config(1)
         engine = ExcelEngine(config=config)
@@ -187,9 +189,10 @@ class TestProgressCallback:
         assert executing_call["phase"] == "executing"
         assert executing_call["task"] == "t0"
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/workbook.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_no_callback_no_error(self, mock_cleanup, mock_dispatch):
+    def test_no_callback_no_error(self, mock_cleanup, mock_dispatch, mock_prep):
         """None callback does not cause errors."""
         plan, config = self._make_plan_and_config(1)
         engine = ExcelEngine(config=config)
@@ -198,9 +201,10 @@ class TestProgressCallback:
         result = engine.execute(plan, Path("/fake/workbook.xlsx"), progress_callback=None)
         assert result.tasks_completed == 1
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/workbook.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task', side_effect=RuntimeError("boom"))
     @patch.object(ExcelEngine, '_cleanup')
-    def test_progress_callback_on_failure(self, mock_cleanup, mock_dispatch):
+    def test_progress_callback_on_failure(self, mock_cleanup, mock_dispatch, mock_prep):
         """On task failure, callback reports success=False."""
         plan, config = self._make_plan_and_config(1)
         config.max_retries = 0
@@ -311,9 +315,10 @@ class TestParallelExecution:
         assert config.parallel_execution is False
         assert config.max_workers == 4
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/wb.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_sequential_unchanged(self, mock_cleanup, mock_dispatch):
+    def test_sequential_unchanged(self, mock_cleanup, mock_dispatch, mock_prep):
         """With parallel_execution=False, tasks run sequentially (existing behavior)."""
         tasks = [
             Task(id="t1", task_type=TaskType.CELL_VALUE, description="enter 1", sheet="Sheet1", cell="A1", value="1"),
@@ -336,9 +341,10 @@ class TestParallelExecution:
         assert calls[0].args[0].id == "t1"
         assert calls[1].args[0].id == "t2"
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/wb.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_parallel_multi_sheet(self, mock_cleanup, mock_dispatch):
+    def test_parallel_multi_sheet(self, mock_cleanup, mock_dispatch, mock_prep):
         """With parallel=True and different sheets, all tasks complete."""
         tasks = [
             Task(id="t1", task_type=TaskType.CELL_VALUE, description="enter 1", sheet="Sheet1", cell="A1", value="1"),
@@ -359,9 +365,10 @@ class TestParallelExecution:
         assert result.tasks_completed == 3
         assert result.success is True
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/wb.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_parallel_same_sheet_serial(self, mock_cleanup, mock_dispatch):
+    def test_parallel_same_sheet_serial(self, mock_cleanup, mock_dispatch, mock_prep):
         """Tasks on the same sheet run serially even in parallel mode."""
         execution_order = []
 
@@ -389,9 +396,10 @@ class TestParallelExecution:
         # Same sheet → must be in order
         assert execution_order == ["t1", "t2", "t3"]
 
+    @patch.object(ExcelEngine, '_prepare_workbook', side_effect=lambda self_or_wb: Path("/fake/wb.xlsx"))
     @patch.object(ExcelEngine, '_dispatch_task')
     @patch.object(ExcelEngine, '_cleanup')
-    def test_parallel_with_progress_callback(self, mock_cleanup, mock_dispatch):
+    def test_parallel_with_progress_callback(self, mock_cleanup, mock_dispatch, mock_prep):
         """Progress callback works in parallel mode."""
         tasks = [
             Task(id="t1", task_type=TaskType.CELL_VALUE, description="enter 1", sheet="Sheet1", cell="A1", value="1"),

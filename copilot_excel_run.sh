@@ -97,7 +97,11 @@ echo "  Version: $VERSION"
 echo
 
 set +e
-python -m excel_engine.cli run "$WORKBOOK" "$INSTRUCTIONS" --watch "${RUN_ARGS[@]}"
+if [[ ${#RUN_ARGS[@]} -gt 0 ]]; then
+  python -m excel_engine.cli run "$WORKBOOK" "$INSTRUCTIONS" --watch "${RUN_ARGS[@]}"
+else
+  python -m excel_engine.cli run "$WORKBOOK" "$INSTRUCTIONS" --watch
+fi
 RUN_RC=$?
 set -e
 

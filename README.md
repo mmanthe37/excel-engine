@@ -222,6 +222,38 @@ You can pass any additional `excel-engine run` flags after the two paths:
 By default, this wrapper also runs a final task-based verification pass. Add
 `--skip-verify` only if you explicitly want execution without the final check.
 
+### Copilot Autonomous Completion Protocol
+
+Use this protocol for Copilot sessions that must autonomously complete workbooks from instruction files.
+
+1. **Canonical repo/path**
+   ```bash
+   cd ~/excel-engine
+   ```
+2. **Activate environment**
+   ```bash
+   source .venv/bin/activate
+   ```
+3. **Preflight checks**
+   ```bash
+   python -m excel_engine.cli check-env
+   python -m pytest -q tests/test_engine_fallback.py tests/test_execution_correctness.py
+   ```
+4. **Safe execution flow (instruction file + workbook)**
+   ```bash
+   ./copilot_excel_run.sh "/full/path/to/assignment.xlsx" "/full/path/to/instructions.docx" --output run.json
+   ```
+5. **False-positive completion guards**
+   - Do **not** pass `--skip-verify` for autonomous runs.
+   - Require wrapper exit code `0`.
+   - If using `--output`, require `success: true`, empty `failed_tasks`, and no verification failures before declaring completion.
+6. **Troubleshooting quick map**
+   - `Worksheet '...' does not exist` → sheet target mismatch; fix extracted task/instruction target before rerun.
+   - `Verification failed for task ...` → treat section/run as failed; rerun with `--watch`, inspect task target/value.
+   - `Save validation failed ... missing [Content_Types].xml` → workbook save corruption risk; stop and rerun after checking file permissions/free space.
+   - `xlwings ... Cannot find Excel` / Excel hung → open Excel manually, dismiss dialogs, rerun `check-env`.
+   - Accessibility/System Events errors → grant terminal Accessibility permissions (see `docs/troubleshooting.md`).
+
 ### Python API
 
 ```python

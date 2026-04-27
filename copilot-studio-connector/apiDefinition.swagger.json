@@ -1,0 +1,268 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Excel Engine MCP",
+    "description": "Autonomous Excel automation engine. Completes Excel spreadsheet assignments using a 6-layer architecture: openpyxl, xlwings, AppleScript, System Events, VBA, and PyAutoGUI.",
+    "version": "1.0.0",
+    "x-ms-agentic-protocol": "mcp-streamable-1.0",
+    "contact": {
+      "name": "Excel Engine",
+      "url": "https://github.com/mmanthe37/excel-engine"
+    }
+  },
+  "host": "excel-engine-mcp.azurewebsites.net",
+  "basePath": "/",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/mcp": {
+      "post": {
+        "summary": "Excel Engine MCP Endpoint",
+        "description": "JSON-RPC 2.0 endpoint for MCP streamable HTTP. Supports tools: complete_assignment, parse_instructions, execute_openpyxl, execute_live, verify_workbook, get_engine_status.",
+        "operationId": "McpEndpoint",
+        "x-ms-agentic-protocol": "mcp-streamable-1.0",
+        "parameters": [
+          {
+            "name": "Mcp-Session-Id",
+            "in": "header",
+            "required": false,
+            "type": "string",
+            "description": "Optional session identifier for stateful MCP interactions",
+            "x-ms-summary": "MCP Session ID"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": ["jsonrpc", "method"],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "description": "JSON-RPC version, must be '2.0'",
+                  "x-ms-summary": "JSON-RPC Version"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Unique request identifier for correlating responses",
+                  "x-ms-summary": "Request ID"
+                },
+                "method": {
+                  "type": "string",
+                  "description": "MCP method name: initialize, tools/list, tools/call, resources/list, resources/read, ping",
+                  "x-ms-summary": "Method"
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Method parameters. For tools/call: {name, arguments}. For initialize: {protocolVersion, clientInfo}.",
+                  "x-ms-summary": "Parameters"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful MCP JSON-RPC response",
+            "headers": {
+              "Mcp-Session-Id": {
+                "type": "string",
+                "description": "Session identifier echoed back from server"
+              }
+            },
+            "schema": {
+              "type": "object",
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "description": "JSON-RPC version (2.0)"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Echoed request identifier"
+                },
+                "result": {
+                  "type": "object",
+                  "description": "Successful result payload. For tools/call: {content: [{type, text}], isError}"
+                },
+                "error": {
+                  "type": "object",
+                  "description": "Error payload present only when the request failed",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "description": "JSON-RPC error code"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable error message"
+                    },
+                    "data": {
+                      "type": "object",
+                      "description": "Additional error context"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (parse error or invalid JSON-RPC)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "jsonrpc": { "type": "string" },
+                "id": { "type": "string" },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — invalid or missing API key",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "detail": { "type": "string" }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected error",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "jsonrpc": { "type": "string" },
+                "id": { "type": "string" },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "api_key": [] }]
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Returns server liveness status. No authentication required.",
+        "operationId": "HealthCheck",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "description": "Health status (ok)"
+                },
+                "server": {
+                  "type": "string",
+                  "description": "Server identifier"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "Server version"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    }
+  },
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-API-Key"
+    }
+  },
+  "definitions": {
+    "McpRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "properties": {
+        "jsonrpc": {
+          "type": "string",
+          "description": "JSON-RPC version, must be '2.0'"
+        },
+        "id": {
+          "type": "string",
+          "description": "Request identifier"
+        },
+        "method": {
+          "type": "string",
+          "description": "MCP method name"
+        },
+        "params": {
+          "type": "object",
+          "description": "Method parameters"
+        }
+      }
+    },
+    "McpResponse": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "type": "string",
+          "description": "JSON-RPC version"
+        },
+        "id": {
+          "type": "string",
+          "description": "Request identifier"
+        },
+        "result": {
+          "type": "object",
+          "description": "Successful result payload"
+        }
+      }
+    },
+    "McpErrorResponse": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "type": "string",
+          "description": "JSON-RPC version"
+        },
+        "id": {
+          "type": "string",
+          "description": "Request identifier"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "description": "JSON-RPC error code"
+            },
+            "message": {
+              "type": "string",
+              "description": "Error message"
+            },
+            "data": {
+              "type": "object",
+              "description": "Additional error data"
+            }
+          }
+        }
+      }
+    }
+  }
+}

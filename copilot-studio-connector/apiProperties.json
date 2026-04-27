@@ -1,0 +1,36 @@
+{
+  "properties": {
+    "connectionParameters": {
+      "api_key": {
+        "type": "securestring",
+        "uiDefinition": {
+          "displayName": "API Key",
+          "description": "The API key for the Excel Engine MCP server. Set the EXCEL_ENGINE_API_KEY environment variable on the server.",
+          "tooltip": "Provide the X-API-Key secret configured on your Excel Engine MCP deployment",
+          "constraints": {
+            "required": "true",
+            "tabIndex": 2
+          }
+        }
+      }
+    },
+    "iconBrandColor": "#1D6F42",
+    "capabilities": ["actions"],
+    "policyTemplateInstances": [
+      {
+        "templateId": "setheader",
+        "title": "Set API Key Header",
+        "parameters": {
+          "x-ms-apimTemplateParameter.name": "X-API-Key",
+          "x-ms-apimTemplateParameter.value": "@connectionParameters('api_key')",
+          "x-ms-apimTemplateParameter.existsAction": "override"
+        }
+      }
+    ]
+  },
+  "displayName": "Excel Engine MCP",
+  "description": "Autonomous Excel automation engine. Completes Excel spreadsheet assignments using a 6-layer architecture: openpyxl, xlwings, AppleScript, System Events, VBA, and PyAutoGUI. Integrates with Microsoft Copilot Studio via MCP streamable HTTP.",
+  "tags": {
+    "primaryCategory": "Productivity"
+  }
+}

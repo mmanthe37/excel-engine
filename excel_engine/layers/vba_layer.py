@@ -323,6 +323,138 @@ class VBALayer:
         self.execute_vba(vba)
         logger.info("Created PivotChart for '%s'", pivot_table_name)
 
+    def manage_slicer(
+        self,
+        field: str = "Product",
+        target_range: Optional[str] = None,
+        selection: Optional[str] = None,
+        dest_sheet: Optional[str] = None,
+    ) -> None:
+        """Create/configure a slicer for the first available PivotTable."""
+        safe_field = self._escape_vba(field or "Product")
+        safe_selection = self._escape_vba(selection) if selection else ""
+        safe_dest = self._escape_vba(dest_sheet) if dest_sheet else ""
+
+        if dest_sheet:
+            sheet_block = textwrap.dedent(
+                f"""\
+                Set ws = Nothing
+                On Error Resume Next
+                Set ws = Sheets("{safe_dest}")
+                On Error GoTo 0
+                """
+            )
+        else:
+            sheet_block = textwrap.dedent(
+                """\
+                Set ws = Nothing
+                Dim candidateWs As Worksheet
+                For Each candidateWs In ActiveWorkbook.Worksheets
+                    If candidateWs.PivotTables.Count > 0 Then
+                        Set ws = candidateWs
+                        Exit For
+                    End If
+                Next candidateWs
+                """
+            )
+
+        position_block = ""
+        if target_range and ":" in target_range:
+            start_cell, end_cell = target_range.split(":", 1)
+            position_block = textwrap.dedent(
+                f"""\
+                    Dim r1 As Range
+                    Dim r2 As Range
+                    Set r1 = ws.Range("{self._escape_vba(start_cell)}")
+                    Set r2 = ws.Range("{self._escape_vba(end_cell)}")
+                    sl.Left = r1.Left
+                    sl.Top = r1.Top
+                    sl.Width = (r2.Left + r2.Width) - r1.Left
+                    sl.Height = (r2.Top + r2.Height) - r1.Top
+                """
+            )
+
+        selection_block = ""
+        if safe_selection:
+            selection_block = textwrap.dedent(
+                f"""\
+                    Dim si As SlicerItem
+                    sc.ClearManualFilter
+                    For Each si In sc.SlicerItems
+                        si.Selected = (LCase(si.Name) = LCase("{safe_selection}"))
+                    Next si
+                """
+            )
+
+        vba = textwrap.dedent(
+            f"""\
+            Sub ManageSlicer()
+                Dim ws As Worksheet
+                {sheet_block}
+                If ws Is Nothing Then
+                    Err.Raise vbObjectError + 510, "ManageSlicer", "No worksheet with PivotTable found."
+                End If
+                If ws.PivotTables.Count = 0 Then
+                    Err.Raise vbObjectError + 511, "ManageSlicer", "PivotTable required before slicer creation."
+                End If
+
+                Dim pt As PivotTable
+                Set pt = ws.PivotTables(1)
+
+                Dim sc As SlicerCache
+                Set sc = Nothing
+
+                Dim existingCache As SlicerCache
+                For Each existingCache In ActiveWorkbook.SlicerCaches
+                    If LCase(existingCache.SourceName) = LCase("{safe_field}") Then
+                        Set sc = existingCache
+                        Exit For
+                    End If
+                Next existingCache
+
+                If sc Is Nothing Then
+                    On Error Resume Next
+                    Set sc = ActiveWorkbook.SlicerCaches.Add2(pt, "{safe_field}")
+                    If sc Is Nothing Then
+                        Set sc = ActiveWorkbook.SlicerCaches.Add(pt, "{safe_field}")
+                    End If
+                    On Error GoTo 0
+                End If
+
+                If sc Is Nothing Then
+                    Err.Raise vbObjectError + 512, "ManageSlicer", "Unable to create slicer cache for field '{safe_field}'."
+                End If
+
+                Dim sl As Slicer
+                If sc.Slicers.Count > 0 Then
+                    Set sl = sc.Slicers(1)
+                Else
+                    Set sl = sc.Slicers.Add(ws, , "{safe_field} Slicer", "{safe_field}", 220, 80, 180, 220)
+                End If
+
+                {position_block}
+                {selection_block}
+
+                Set sl = Nothing
+                Set sc = Nothing
+                Set pt = Nothing
+                Set ws = Nothing
+            End Sub
+
+            Sub Main()
+                ManageSlicer
+            End Sub
+            """
+        )
+
+        self.execute_vba(vba)
+        logger.info(
+            "Managed slicer field=%s target_range=%s selection=%s",
+            field,
+            target_range,
+            selection,
+        )
+
     # ── Helpers ──
 
     @staticmethod

@@ -42,6 +42,8 @@ from excel_engine.planner.task_planner import TaskPlanner, ExecutionPlan, Sectio
 from excel_engine.verifier.workbook_verifier import WorkbookVerifier, SectionVerification
 from excel_engine.utils.path_handler import PathHandler
 from excel_engine.utils.mac_utils import MacUtils
+from openpyxl.utils.cell import coordinate_to_tuple, range_boundaries
+from openpyxl import load_workbook
 
 logger = logging.getLogger(__name__)
 
@@ -566,6 +568,21 @@ class ExcelEngine:
 
         if not layers_to_try:
             logger.warning("No layer can handle task type: %s", task.task_type.value)
+            return False, collected_errors
+
+        # Pre-dispatch validation: catch bad targets before attempting any layer
+        try:
+            self._validate_task_targets(task, workbook)
+        except ValueError as ve:
+            logger.warning("Task %s target validation failed: %s", task.id, ve)
+            collected_errors.append(TaskError(
+                task_id=task.id,
+                task_type=task.task_type,
+                layer=layers_to_try[0] if layers_to_try else Layer.OPENPYXL,
+                error_type="permanent",
+                message=f"Validation: {ve}",
+                timestamp=__import__('time').time(),
+            ))
             return False, collected_errors
 
         strategy = RecoveryStrategy(
@@ -1300,6 +1317,196 @@ class ExcelEngine:
             logger.info("Restored workbook from backup: %s", self._backup_path.name)
         else:
             logger.error("No backup available to restore!")
+
+    def _validate_task_targets(self, task: Task, workbook: Path) -> None:
+        """Validate sheet/cell/range/table targets before dispatch."""
+        if self._openpyxl.wb is None and not workbook.exists():
+            return
+
+        wb = self._openpyxl.wb
+        temp_wb = None
+        if wb is None:
+            temp_wb = load_workbook(str(workbook), data_only=False)
+            wb = temp_wb
+
+        try:
+            if task.task_type == TaskType.SHEET_CREATE:
+                return
+
+            if task.task_type == TaskType.SHEET_RENAME:
+                old_name = str(task.params.get("old_name") or "").strip()
+                if old_name and old_name not in wb.sheetnames:
+                    raise ValueError(f"Worksheet {old_name!r} does not exist.")
+                return
+
+            if task.task_type == TaskType.SHEET_COPY:
+                source = task.params.get("source") or task.sheet or wb.active.title
+                if not source or str(source).strip().lower() in {"the", "a", "an"}:
+                    source = wb.active.title
+                if source not in wb.sheetnames:
+                    raise ValueError(f"Worksheet {source!r} does not exist.")
+                return
+
+            if task.task_type in {TaskType.SAVE, TaskType.SAVE_AS}:
+                return
+
+            ws = wb.active
+            if task.sheet:
+                if task.sheet not in wb.sheetnames:
+                    raise ValueError(f"Worksheet {task.sheet!r} does not exist.")
+                ws = wb[task.sheet]
+
+            if task.cell:
+                self._validate_cell_reference(task.cell, task.id)
+
+            range_validated_types = {
+                TaskType.TABLE_CREATE,
+                TaskType.CONDITIONAL_FORMAT,
+                TaskType.DATA_VALIDATION,
+                TaskType.AUTOFILTER,
+                TaskType.ADVANCED_FILTER,
+                TaskType.SORT,
+                TaskType.SUBTOTAL,
+                TaskType.MERGE_CELLS,
+                TaskType.CHART_BAR,
+                TaskType.CHART_LINE,
+                TaskType.CHART_PIE,
+                TaskType.CHART_SCATTER,
+                TaskType.CHART_AREA,
+                TaskType.CHART_COMBO,
+                TaskType.CHART_HISTOGRAM,
+                TaskType.SPARKLINE,
+                TaskType.HYPERLINK,
+            }
+            if task.range and task.task_type in range_validated_types:
+                self._validate_range_reference(task.range, task.id)
+
+            table_name = str(
+                task.params.get("table_name")
+                or task.params.get("name")
+                or ""
+            ).strip()
+            if task.task_type in {TaskType.TABLE_STYLE, TaskType.TABLE_TOTAL_ROW}:
+                if table_name:
+                    if table_name not in ws.tables:
+                        raise ValueError(
+                            f"Table {table_name!r} does not exist on worksheet {ws.title!r}."
+                        )
+                elif not ws.tables:
+                    raise ValueError(f"No tables exist on worksheet {ws.title!r}.")
+
+            if task.task_type == TaskType.SORT and table_name and table_name not in ws.tables:
+                raise ValueError(
+                    f"Table {table_name!r} does not exist on worksheet {ws.title!r}."
+                )
+        finally:
+            if temp_wb is not None:
+                temp_wb.close()
+
+    @staticmethod
+    def _validate_cell_reference(cell_ref: str, task_id: str) -> None:
+        """Validate a single A1-style cell reference."""
+        try:
+            coordinate_to_tuple(cell_ref.replace("$", ""))
+        except Exception as exc:
+            raise ValueError(f"Task {task_id} has invalid cell reference: {cell_ref!r}") from exc
+
+    @staticmethod
+    def _validate_range_reference(range_ref: str, task_id: str) -> None:
+        """Validate an A1-style range reference (single or comma-separated)."""
+        try:
+            for raw_part in str(range_ref).split(","):
+                part = raw_part.strip()
+                if not part:
+                    continue
+                part = part.split("!")[-1].replace("$", "")
+                if "[" in part or "]" in part:
+                    continue
+                if ":" in part:
+                    range_boundaries(part)
+                else:
+                    coordinate_to_tuple(part)
+        except Exception as exc:
+            raise ValueError(f"Task {task_id} has invalid range reference: {range_ref!r}") from exc
+
+    def _finalize_xlwings_copy(self, cleanup: bool) -> None:
+        """Sync and optionally clean up xlwings desktop-copy lifecycle."""
+        source = getattr(self, "_xlwings_source_workbook", None)
+        session = getattr(self, "_xlwings_session_workbook", None)
+        if source and session and session != source:
+            self.path_handler.copy_back_from_desktop(session, source)
+            if cleanup:
+                self.path_handler.cleanup_desktop_copy(session, source)
+        if cleanup:
+            self._xlwings_source_workbook = None
+            self._xlwings_session_workbook = None
+
+    def _sort_openpyxl_range(
+        self,
+        ws: Any,
+        range_ref: str,
+        sort_keys: list[dict[str, Any]],
+        task_id: str,
+    ) -> None:
+        """Sort worksheet rows in-place for a range/table reference."""
+        if not range_ref:
+            logger.info("Sort task %s skipped: no range reference", task_id)
+            return
+
+        min_col, min_row, max_col, max_row = range_boundaries(range_ref)
+        if max_row - min_row < 1:
+            logger.info("Sort task %s skipped: no data rows in %s", task_id, range_ref)
+            return
+
+        header_cells = [
+            ws.cell(row=min_row, column=col).value for col in range(min_col, max_col + 1)
+        ]
+        header_names = [str(v).strip() if v is not None else "" for v in header_cells]
+
+        data_rows = []
+        for row in range(min_row + 1, max_row + 1):
+            values = [ws.cell(row=row, column=col).value for col in range(min_col, max_col + 1)]
+            data_rows.append(values)
+
+        def _resolve_col_index(key: dict[str, Any]) -> Optional[int]:
+            col_name = str(key.get("column", "")).strip()
+            if col_name:
+                for idx, header in enumerate(header_names):
+                    if header.lower() == col_name.lower():
+                        return idx
+            col_idx = key.get("column_index")
+            if isinstance(col_idx, int) and 1 <= col_idx <= len(header_names):
+                return col_idx - 1
+            return None
+
+        resolved_keys: list[tuple[int, bool]] = []
+        for key in sort_keys or []:
+            idx = _resolve_col_index(key)
+            if idx is None:
+                continue
+            reverse = str(key.get("order", "ascending")).lower().startswith("desc")
+            resolved_keys.append((idx, reverse))
+
+        if not resolved_keys:
+            logger.info(
+                "Sort task %s skipped: no resolvable key columns for range %s",
+                task_id,
+                range_ref,
+            )
+            return
+
+        # Stable multi-key sort: apply least-significant key first.
+        sorted_rows = list(data_rows)
+        for idx, reverse in reversed(resolved_keys):
+            sorted_rows.sort(
+                key=lambda r, _idx=idx: (r[_idx] is None, r[_idx]),
+                reverse=reverse,
+            )
+
+        for row_offset, row_values in enumerate(sorted_rows):
+            target_row = min_row + 1 + row_offset
+            for col_offset, value in enumerate(row_values):
+                ws.cell(row=target_row, column=min_col + col_offset, value=value)
 
     def _cleanup(self) -> None:
         """Clean up all layer connections and temporary files."""

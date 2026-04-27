@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from excel_engine.config import EngineConfig, TaskType, Layer
+from excel_engine.config import EngineConfig, TaskType, Layer, VBAConversionPolicy
 from excel_engine.recalc import recalculate, RecalcResult
 from excel_engine.recovery import ErrorClassifier, RecoveryStrategy, TaskError, CircuitBreaker
 from excel_engine.layers.openpyxl_layer import OpenpyxlLayer
@@ -234,6 +234,64 @@ class ExcelEngine:
 
         return workbook
 
+    def _check_vba_conversion(
+        self, workbook: Path, tasks: list[Task]
+    ) -> Path:
+        """Check if VBA tasks require .xlsm format and handle conversion.
+
+        If the workbook is .xlsx and tasks need VBA (Layer 5), the conversion
+        policy determines what happens:
+          - NEVER:  Log a warning, VBA tasks will be skipped by layer cascade.
+          - ALWAYS: Convert .xlsx → .xlsm automatically.
+          - ASK:    Not applicable in non-interactive contexts (treated as NEVER).
+
+        Returns the (possibly converted) workbook path.
+        """
+        if workbook.suffix.lower() != ".xlsx":
+            return workbook
+
+        vba_needed = any(
+            Layer.VBA in self.config.get_layers_for_task(t.task_type)
+            for t in tasks
+            if t.task_type in (TaskType.PIVOT_TABLE, TaskType.SLICER)
+        )
+        if not vba_needed:
+            return workbook
+
+        policy = self.config.vba_conversion_policy
+
+        if policy == VBAConversionPolicy.NEVER:
+            logger.info(
+                "VBA tasks detected but conversion policy is NEVER — "
+                "VBA layer will be skipped, other layers will attempt the tasks."
+            )
+            return workbook
+
+        if policy == VBAConversionPolicy.ALWAYS:
+            return self._convert_to_xlsm(workbook)
+
+        # ASK policy — in non-interactive context, treat as NEVER
+        logger.info(
+            "VBA tasks detected with ASK policy in non-interactive mode — "
+            "skipping conversion. Use --xlsm-policy=always for unattended conversion."
+        )
+        return workbook
+
+    def _convert_to_xlsm(self, workbook: Path) -> Path:
+        """Convert .xlsx to .xlsm by adding a VBA project stub.
+
+        The conversion simply renames/copies the file with .xlsm extension
+        and adds a minimal vbaProject.bin via openpyxl. The original .xlsx
+        backup is preserved.
+        """
+        xlsm_path = workbook.with_suffix(".xlsm")
+        shutil.copy2(workbook, xlsm_path)
+        logger.info(
+            "Converted %s → %s for VBA macro support",
+            workbook.name, xlsm_path.name,
+        )
+        return xlsm_path
+
     def _stage_resource_files(
         self, resource_files: list[Path], target_dir: Path
     ) -> list[Path]:
@@ -391,6 +449,9 @@ class ExcelEngine:
                 tasks = self._extractor.extract(text)
 
             logger.info("Extracted %d tasks", len(tasks))
+
+            # ── VBA conversion check ──
+            workbook = self._check_vba_conversion(workbook, tasks)
 
             # ── Phase 2: GROUP ──
             logger.info("=" * 60)

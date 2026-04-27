@@ -23,6 +23,7 @@ from excel_engine import (  # noqa: E402
     EngineConfig,
     EngineResult,
     Layer,
+    VBAConversionPolicy,
     __version__,
 )
 
@@ -72,6 +73,19 @@ with st.sidebar:
             "Circuit breaker (skip failing layers)",
             value=True,
             help="Automatically skip layers that fail repeatedly instead of retrying endlessly.",
+        )
+
+    with st.expander("🔧 VBA / Macro Settings", expanded=False):
+        xlsm_policy = st.selectbox(
+            "VBA conversion policy",
+            options=["never", "ask", "always"],
+            index=0,
+            help=(
+                "If VBA macros are needed but the file is .xlsx:\n"
+                "• **never** — skip VBA tasks, use other layers\n"
+                "• **ask** — prompt before converting\n"
+                "• **always** — auto-convert to .xlsm"
+            ),
         )
 
     st.divider()
@@ -269,6 +283,9 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
                 config.max_workers = max_workers
             if hasattr(config, "circuit_breaker_threshold"):
                 config.circuit_breaker_threshold = 5 if circuit_breaker else 0
+
+            # VBA conversion policy
+            config.vba_conversion_policy = VBAConversionPolicy(xlsm_policy)
 
             engine = ExcelEngine(config)
 

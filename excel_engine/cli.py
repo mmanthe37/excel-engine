@@ -129,6 +129,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         ]
     # else "both" — keep default layer_order
 
+    # VBA conversion policy
+    xlsm_policy = getattr(args, "xlsm_policy", None)
+    if isinstance(xlsm_policy, str):
+        from excel_engine.config import VBAConversionPolicy
+        config.vba_conversion_policy = VBAConversionPolicy(xlsm_policy)
+
     engine = ExcelEngine(config=config)
 
     print(f"── Excel Engine v{excel_engine.__version__} ──")
@@ -508,6 +514,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--resources", nargs="+", metavar="FILE",
         help="Additional resource/data files (.xlsx, .pdf, .docx, .zip, etc.)",
+    )
+    run_p.add_argument(
+        "--xlsm-policy", choices=["never", "ask", "always"], default="never",
+        help="VBA macro conversion policy: never (default), ask, or always",
     )
 
     # ── parse ──

@@ -20,6 +20,18 @@ class Layer(IntEnum):
     PYAUTOGUI = 6
 
 
+class VBAConversionPolicy(Enum):
+    """Policy for .xlsx → .xlsm conversion when VBA macros are required.
+
+    NEVER:  Never convert — skip VBA tasks if the file is .xlsx.
+    ASK:    Prompt the user before converting (default for GUI/interactive).
+    ALWAYS: Convert automatically when VBA is needed (for unattended/CI).
+    """
+    NEVER = "never"
+    ASK = "ask"
+    ALWAYS = "always"
+
+
 class TaskType(Enum):
     """Recognized task types that the engine can execute."""
     # ── Data Entry & Formulas ──
@@ -219,6 +231,7 @@ class EngineConfig:
 
     # VBA
     vba_split_threshold: int = 50  # lines per sub to avoid OOM Error 7
+    vba_conversion_policy: VBAConversionPolicy = VBAConversionPolicy.NEVER
 
     # Verification
     verify_after_each_section: bool = True

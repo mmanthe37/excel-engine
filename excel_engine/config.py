@@ -107,11 +107,11 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.FILTER_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
     TaskType.SORT_FUNCTION:       [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
     TaskType.UNIQUE_FUNCTION:     [Layer.XLWINGS, Layer.APPLESCRIPT],    # dynamic array — live only
-    TaskType.THREE_D_REFERENCE:   [Layer.XLWINGS, Layer.APPLESCRIPT],    # cross-sheet — live preferred
-    TaskType.EXTERNAL_REFERENCE:  [Layer.XLWINGS, Layer.APPLESCRIPT],    # external links — live only
+    TaskType.THREE_D_REFERENCE:   [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],    # openpyxl can write cross-sheet formulas
+    TaskType.EXTERNAL_REFERENCE:  [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],    # openpyxl can write external formulas
 
     # ── Tables ──
-    TaskType.TABLE_CREATE:        [Layer.OPENPYXL],
+    TaskType.TABLE_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.TABLE_STYLE:         [Layer.OPENPYXL, Layer.SYSTEM_EVENTS],
     TaskType.TABLE_TOTAL_ROW:     [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.CALCULATED_COLUMN:   [Layer.XLWINGS, Layer.APPLESCRIPT],    # structural refs need LIVE
@@ -132,16 +132,16 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     # ── View & Layout ──
     TaskType.FREEZE_PANES:        [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.SPLIT_PANES:         [Layer.XLWINGS],
-    TaskType.PAGE_BREAK:          [Layer.OPENPYXL],
+    TaskType.PAGE_BREAK:          [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.PRINT_SETTINGS:      [Layer.OPENPYXL],
 
     # ── Data Tools ──
     TaskType.AUTOFILTER:          [Layer.OPENPYXL, Layer.APPLESCRIPT],
     TaskType.ADVANCED_FILTER:     [Layer.XLWINGS],
-    TaskType.SORT:                [Layer.APPLESCRIPT, Layer.XLWINGS],
-    TaskType.SUBTOTAL:            [Layer.XLWINGS],
+    TaskType.SORT:                [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],
+    TaskType.SUBTOTAL:            [Layer.XLWINGS, Layer.APPLESCRIPT],
     TaskType.DATA_VALIDATION:     [Layer.OPENPYXL],
-    TaskType.GOAL_SEEK:           [Layer.XLWINGS],                     # live Excel required
+    TaskType.GOAL_SEEK:           [Layer.XLWINGS, Layer.APPLESCRIPT],    # live Excel required
 
     # ── Charts ──
     TaskType.CHART_BAR:           [Layer.OPENPYXL],
@@ -158,7 +158,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.HYPERLINK:           [Layer.OPENPYXL, Layer.XLWINGS],
 
     # ── Advanced Features ──
-    TaskType.SLICER:              [Layer.SYSTEM_EVENTS],                 # must use ribbon UI
+    TaskType.SLICER:              [Layer.VBA, Layer.SYSTEM_EVENTS],      # VBA is more reliable on current macOS Excel UI
     TaskType.PIVOT_TABLE:         [Layer.VBA],
     TaskType.PIVOT_CHART:         [Layer.VBA],
 
@@ -166,7 +166,7 @@ TASK_LAYER_MAP: dict[TaskType, list[Layer]] = {
     TaskType.SHEET_CREATE:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_RENAME:        [Layer.OPENPYXL, Layer.XLWINGS],
     TaskType.SHEET_MOVE:          [Layer.OPENPYXL, Layer.XLWINGS],
-    TaskType.SHEET_COPY:          [Layer.OPENPYXL, Layer.XLWINGS],
+    TaskType.SHEET_COPY:          [Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT],    # openpyxl can copy_worksheet
 
     # ── File Operations ──
     TaskType.SAVE:                [Layer.APPLESCRIPT, Layer.XLWINGS],
@@ -197,8 +197,8 @@ class EngineConfig:
             Layer.OPENPYXL,
             Layer.XLWINGS,
             Layer.APPLESCRIPT,
-            Layer.SYSTEM_EVENTS,
             Layer.VBA,
+            Layer.SYSTEM_EVENTS,
             Layer.PYAUTOGUI,
         ]
     )

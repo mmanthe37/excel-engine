@@ -313,7 +313,7 @@ class TestExecuteTask:
         """First layer raises NotImplementedError, falls through to second."""
         config = EngineConfig(layer_order=[
             Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT,
-            Layer.SYSTEM_EVENTS, Layer.VBA, Layer.PYAUTOGUI,
+            Layer.VBA, Layer.SYSTEM_EVENTS, Layer.PYAUTOGUI,
         ])
         engine = ExcelEngine(config=config)
         task = _make_task(task_type=TaskType.CELL_VALUE)
@@ -356,7 +356,7 @@ class TestExecuteTask:
         config = EngineConfig(
             max_retries=3, retry_delay=0.01,
             layer_order=[Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT,
-                         Layer.SYSTEM_EVENTS, Layer.VBA, Layer.PYAUTOGUI],
+                         Layer.VBA, Layer.SYSTEM_EVENTS, Layer.PYAUTOGUI],
         )
         engine = ExcelEngine(config=config)
         task = _make_task(task_type=TaskType.CELL_VALUE)
@@ -386,7 +386,7 @@ class TestExecuteTask:
         config = EngineConfig(
             max_retries=2, retry_delay=0.01,
             layer_order=[Layer.OPENPYXL, Layer.XLWINGS, Layer.APPLESCRIPT,
-                         Layer.SYSTEM_EVENTS, Layer.VBA, Layer.PYAUTOGUI],
+                         Layer.VBA, Layer.SYSTEM_EVENTS, Layer.PYAUTOGUI],
         )
         engine = ExcelEngine(config=config)
         task = _make_task(task_type=TaskType.CELL_VALUE)

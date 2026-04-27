@@ -30,10 +30,10 @@ class TestEngineConfig:
         assert Layer.OPENPYXL in layers
         assert layers[0] == Layer.OPENPYXL  # preferred
 
-    def test_slicer_requires_system_events(self):
+    def test_slicer_requires_vba_or_system_events(self):
         config = EngineConfig()
         layers = config.get_layers_for_task(TaskType.SLICER)
-        assert layers == [Layer.SYSTEM_EVENTS]
+        assert layers == [Layer.VBA, Layer.SYSTEM_EVENTS]
 
     def test_calculated_column_prefers_live(self):
         config = EngineConfig()

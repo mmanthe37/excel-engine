@@ -161,10 +161,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             }, args.output)
         return 0
 
+    # Resolve resource files (if any)
+    resource_files = None
+    if getattr(args, "resources", None):
+        resource_files = [Path(r).resolve() for r in args.resources]
+        missing = [r for r in resource_files if not r.exists()]
+        if missing:
+            for m in missing:
+                print(f"Warning: resource file not found: {m}", file=sys.stderr)
+            resource_files = [r for r in resource_files if r.exists()]
+
     result = engine.run(
         workbook=workbook,
         instructions=instructions,
         progress_callback=progress_callback,
+        resource_files=resource_files,
     )
     print(result.summary())
 
@@ -494,6 +505,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument("--config", help="Path to JSON config file")
     run_p.add_argument("--output", "-o", help="Write results to JSON file")
+    run_p.add_argument(
+        "--resources", nargs="+", metavar="FILE",
+        help="Additional resource/data files (.xlsx, .pdf, .docx, .zip, etc.)",
+    )
 
     # ── parse ──
     parse_p = subparsers.add_parser("parse", help="Parse instructions to structured JSON")

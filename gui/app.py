@@ -122,6 +122,26 @@ with col2:
         "Format column C as currency. Add a header row with bold text.'",
     )
 
+# ────────────────────────────────────────────────────────────────
+# Additional resource files (optional)
+# ────────────────────────────────────────────────────────────────
+with st.expander("📎 Additional Resource / Data Files (optional)", expanded=False):
+    st.caption(
+        "Upload any companion files the assignment references — "
+        "data workbooks, PDFs, images, etc."
+    )
+    resource_files_upload = st.file_uploader(
+        "Upload resource files",
+        type=[
+            "xlsx", "xls", "xlsm", "csv",
+            "pdf", "docx", "doc", "txt", "rtf",
+            "zip",
+            "png", "jpg", "jpeg", "gif", "bmp", "tiff",
+        ],
+        accept_multiple_files=True,
+        help="Supports .xlsx, .csv, .pdf, .docx, .txt, .zip, and image files.",
+    )
+
 
 # ────────────────────────────────────────────────────────────────
 # Helper: display EngineResult
@@ -227,6 +247,14 @@ if st.button("🚀 Run Excel Engine", type="primary", use_container_width=True):
             if instruction_file:
                 instr_path = work_dir / instruction_file.name
                 instr_path.write_bytes(instruction_file.read())
+
+            # Save uploaded resource files (if any)
+            res_paths = []
+            if resource_files_upload:
+                for rf in resource_files_upload:
+                    rf_path = work_dir / rf.name
+                    rf_path.write_bytes(rf.read())
+                    res_paths.append(rf_path)
 
             # Configure engine
             config = EngineConfig()

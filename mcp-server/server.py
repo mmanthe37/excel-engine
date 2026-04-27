@@ -139,6 +139,7 @@ def complete_assignment(
     workbook_path: str,
     instruction_path: str,
     options: Optional[dict] = None,
+    resource_paths: Optional[list[str]] = None,
 ) -> str:
     """Complete an Excel assignment autonomously.
 
@@ -149,6 +150,8 @@ def complete_assignment(
         workbook_path: Path to the .xlsx workbook file.
         instruction_path: Path to the instruction file (.docx, .rtfd, .pdf, .txt).
         options: Optional engine config overrides (max_retries, verify_after_each_section, etc.).
+        resource_paths: Optional list of additional resource/data file paths
+            (.xlsx, .pdf, .docx, .zip, images, etc.) referenced by the assignment.
 
     Returns:
         JSON report with success status, task counts, verification results, and timing.
@@ -162,6 +165,17 @@ def complete_assignment(
         if not inst.exists() and not inst.is_dir():
             return json.dumps({"error": f"Instruction file not found: {inst}"})
 
+        # Resolve resource files
+        res_files = None
+        if resource_paths:
+            res_files = []
+            for rp in resource_paths:
+                resolved = _resolve_path(rp)
+                if resolved.exists():
+                    res_files.append(resolved)
+                else:
+                    logger.warning("Resource file not found: %s", rp)
+
         config = EngineConfig()
         _SAFE_OPTIONS = {"max_retries", "verify_after_each_section", "retina_display", "scan_timeout"}
         if options:
@@ -172,7 +186,11 @@ def complete_assignment(
         logger.info("Starting assignment: %s with %s", wb.name, inst.name)
         engine = ExcelEngine(config=config)
         progress_cb = _make_progress_callback()
-        result = engine.run(workbook=wb, instructions=inst, progress_callback=progress_cb)
+        result = engine.run(
+            workbook=wb, instructions=inst,
+            progress_callback=progress_cb,
+            resource_files=res_files,
+        )
 
         return json.dumps(_engine_result_to_dict(result), indent=2)
 

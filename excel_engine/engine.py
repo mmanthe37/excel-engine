@@ -148,6 +148,7 @@ class ExcelEngine:
         # xlwings tasks, cleaned up at end.
         self._xlwings_safe_path: Optional[Path] = None
         self._backup_path: Optional[Path] = None
+        self._staged_resources: list[Path] = []
 
         # Layer lookup
         self._layers = {
@@ -233,6 +234,44 @@ class ExcelEngine:
 
         return workbook
 
+    def _stage_resource_files(
+        self, resource_files: list[Path], target_dir: Path
+    ) -> list[Path]:
+        """Copy additional resource/data files alongside the workbook.
+
+        Supports .xlsx, .pdf, .docx, .txt, .zip, .csv, .rtf, .png, .jpg,
+        .jpeg, .gif, .bmp, and .tiff files. Files already in target_dir
+        are skipped. Returns the list of staged file paths.
+        """
+        ALLOWED_EXTENSIONS = frozenset({
+            ".xlsx", ".xls", ".xlsm", ".csv",
+            ".pdf", ".docx", ".doc", ".txt", ".rtf",
+            ".zip",
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff",
+        })
+        staged: list[Path] = []
+        for f in resource_files:
+            f = Path(f).resolve()
+            if not f.exists():
+                logger.warning("Resource file not found, skipping: %s", f)
+                continue
+            if f.suffix.lower() not in ALLOWED_EXTENSIONS:
+                logger.warning(
+                    "Unsupported resource type %s, skipping: %s",
+                    f.suffix, f.name,
+                )
+                continue
+            dest = target_dir / f.name
+            if dest == f or dest.exists():
+                logger.info("Resource already in place: %s", f.name)
+                staged.append(dest)
+                continue
+            shutil.copy2(f, dest)
+            logger.info("Staged resource file: %s → %s", f.name, dest)
+            staged.append(dest)
+        self._staged_resources = staged
+        return staged
+
     def execute(self, plan: ExecutionPlan, workbook: Path,
                 progress_callback: Optional[Callable[[dict], None]] = None) -> EngineResult:
         """Execute a pre-built plan against a workbook."""
@@ -312,6 +351,7 @@ class ExcelEngine:
         instruction_text: Optional[str] = None,
         tasks: Optional[list[Task]] = None,
         progress_callback: Optional[Callable[[dict], None]] = None,
+        resource_files: Optional[list[Path]] = None,
     ) -> EngineResult:
         """
         Run the engine on a workbook with instructions.
@@ -320,8 +360,16 @@ class ExcelEngine:
           - instructions: path to instruction file (.docx, .rtfd, .pdf, .txt)
           - instruction_text: raw instruction text
           - tasks: pre-extracted Task list
+
+        Optional:
+          - resource_files: additional data/reference files (.xlsx, .pdf, .docx, etc.)
+            that the assignment may reference. Staged alongside the workbook.
         """
         workbook = Path(workbook).resolve()
+
+        # Stage resource files alongside the workbook
+        if resource_files:
+            self._stage_resource_files(resource_files, workbook.parent)
 
         if tasks:
             tasks = deepcopy(tasks)

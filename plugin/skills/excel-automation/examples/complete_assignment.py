@@ -11,6 +11,7 @@ from pathlib import Path
 
 from excel_engine import ExcelEngine
 from excel_engine.config import EngineConfig
+import excel_engine
 
 
 def main():
@@ -38,7 +39,7 @@ def main():
 
     engine = ExcelEngine(config=config)
 
-    print(f"=== Excel Engine v1.0 ===")
+    print(f"=== Excel Engine v{excel_engine.__version__} ===")
     print(f"Workbook:     {workbook.name}")
     print(f"Instructions: {instructions.name}")
     print()

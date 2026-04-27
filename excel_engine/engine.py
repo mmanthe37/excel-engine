@@ -1027,7 +1027,7 @@ class ExcelEngine:
                 target = task.cell or task.range
                 ws = self._openpyxl._ws(task.sheet)
                 # Delegate to font/fill/border/alignment based on params
-                from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+                from openpyxl.styles import Font
                 cells = ws[target] if ':' in str(target) else [[ws[target]]]
                 for row in cells:
                     for c in (row if hasattr(row, '__iter__') else [row]):

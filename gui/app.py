@@ -111,9 +111,9 @@ with col2:
     st.subheader("📝 Instructions")
     instruction_file = st.file_uploader(
         "Upload instructions",
-        type=["txt", "docx", "pdf", "rtf"],
-        help="RTFD (macOS bundle) cannot be uploaded — paste the text instead, "
-        "or export to PDF/DOCX first.",
+        type=["txt", "docx", "pdf", "rtf", "zip"],
+        help="Upload .docx, .pdf, .txt, .rtf, or .zip containing instructions. "
+        "RTFD (macOS bundle) cannot be uploaded — paste the text instead.",
     )
     instruction_text = st.text_area(
         "Or paste instructions here",

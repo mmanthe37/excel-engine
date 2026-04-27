@@ -1,5 +1,5 @@
 """
-Instruction Parser — Parse .docx, .rtfd, .pdf, .txt instruction files.
+Instruction Parser — Parse .docx, .rtfd, .pdf, .txt, .zip instruction files.
 
 Extracts raw text from instruction documents for task extraction.
 Supports structured SAM instruction parsing with step splitting,
@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+import zipfile
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -30,7 +32,7 @@ class InstructionStep:
 class InstructionParser:
     """Parse instruction files of various formats into plain text."""
 
-    SUPPORTED_EXTENSIONS = {".docx", ".rtfd", ".pdf", ".txt", ".rtf"}
+    SUPPORTED_EXTENSIONS = {".docx", ".rtfd", ".pdf", ".txt", ".rtf", ".zip"}
 
     def parse(self, path: Path) -> str:
         """
@@ -56,6 +58,7 @@ class InstructionParser:
             ".rtf": self._parse_rtf,
             ".pdf": self._parse_pdf,
             ".txt": self._parse_txt,
+            ".zip": self._parse_zip,
         }
 
         text = parser_map[ext](path)
@@ -151,6 +154,40 @@ class InstructionParser:
     def _parse_txt(self, path: Path) -> str:
         """Parse a plain text file."""
         return path.read_text(encoding="utf-8", errors="replace")
+
+    def _parse_zip(self, path: Path) -> str:
+        """Extract and parse instruction files from a ZIP archive.
+
+        Looks for supported instruction file types inside the archive,
+        extracts them to a temp directory, parses each one, and returns
+        the concatenated text.
+        """
+        parseable = {".docx", ".pdf", ".txt", ".rtf", ".doc"}
+        texts: list[str] = []
+
+        with tempfile.TemporaryDirectory(prefix="excel_engine_zip_") as tmp:
+            tmp_dir = Path(tmp)
+            with zipfile.ZipFile(path, "r") as zf:
+                for member in zf.namelist():
+                    # Skip directories and hidden/system files
+                    if member.endswith("/") or member.startswith("__MACOSX"):
+                        continue
+                    ext = Path(member).suffix.lower()
+                    if ext not in parseable:
+                        continue
+                    zf.extract(member, tmp_dir)
+                    extracted = tmp_dir / member
+                    try:
+                        texts.append(self.parse(extracted))
+                    except Exception as e:
+                        logger.warning("Failed to parse %s from ZIP: %s", member, e)
+
+        if not texts:
+            raise ValueError(
+                f"No parseable instruction files found in ZIP: {path.name}. "
+                f"Expected .docx, .pdf, .txt, or .rtf inside the archive."
+            )
+        return "\n\n".join(texts)
 
     # ── Helpers ──
 

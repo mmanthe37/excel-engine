@@ -184,6 +184,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_GENERATION_MODE = GeneratedFile;
 				INFOPLIST_KEY_CFBundleDisplayName = "Excel Engine";
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Excel Engine needs access to your files to process Excel workbooks.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -212,6 +213,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_GENERATION_MODE = GeneratedFile;
 				INFOPLIST_KEY_CFBundleDisplayName = "Excel Engine";
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Excel Engine needs access to your files to process Excel workbooks.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

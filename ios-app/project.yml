@@ -35,6 +35,7 @@ targets:
         INFOPLIST_KEY_NSDocumentsFolderUsageDescription: "Excel Engine needs access to your files to process Excel workbooks."
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleIconName: AppIcon
         CODE_SIGN_STYLE: Automatic
         PRODUCT_BUNDLE_IDENTIFIER: com.michaelmanthe.excel-engine
         PRODUCT_NAME: "Excel Engine"

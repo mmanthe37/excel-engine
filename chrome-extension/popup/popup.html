@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel Engine</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">📊</div>
+      <h1>Excel Engine</h1>
+      <p class="subtitle">Autonomous Excel Automation</p>
+    </header>
+
+    <section class="upload-section">
+      <label class="file-input" id="workbook-label">
+        <span class="file-icon">📁</span>
+        <span class="file-text">Select .xlsx Workbook</span>
+        <input type="file" id="workbook-input" accept=".xlsx,.xls,.xlsm" hidden>
+      </label>
+
+      <label class="file-input secondary" id="instruction-label">
+        <span class="file-icon">📄</span>
+        <span class="file-text">Select Instructions File</span>
+        <input type="file" id="instruction-input" accept=".docx,.pdf,.txt,.rtf,.zip" hidden>
+      </label>
+
+      <label class="file-input secondary" id="resource-label">
+        <span class="file-icon">📎</span>
+        <span class="file-text">Add Resource Files (optional)</span>
+        <input type="file" id="resource-input" accept=".xlsx,.pdf,.docx,.txt,.zip,.png,.jpg" multiple hidden>
+      </label>
+      <div id="resource-list" class="resource-list"></div>
+
+      <div class="text-input-section">
+        <label for="instruction-text">Or type instructions:</label>
+        <textarea id="instruction-text" placeholder="e.g., Set cell B4 to =SUM(B5:B10)"></textarea>
+      </div>
+    </section>
+
+    <section class="options-section">
+      <details>
+        <summary>⚙️ Options</summary>
+        <div class="option-row">
+          <label for="max-layer">Max Layer:</label>
+          <select id="max-layer">
+            <option value="1">1 — openpyxl</option>
+            <option value="2">2 — xlwings</option>
+            <option value="3">3 — AppleScript</option>
+            <option value="4">4 — System Events</option>
+            <option value="5">5 — VBA</option>
+            <option value="6" selected>6 — PyAutoGUI</option>
+          </select>
+        </div>
+        <div class="option-row">
+          <label for="dry-run">
+            <input type="checkbox" id="dry-run"> Dry Run
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <button id="run-btn" class="run-button" disabled>
+      ▶ Run Engine
+    </button>
+
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <p id="status-text" class="status-text">Connecting...</p>
+    </div>
+
+    <div id="result-section" class="result-section" hidden>
+      <div id="result-icon" class="result-icon"></div>
+      <p id="result-text" class="result-text"></p>
+      <p id="result-detail" class="result-detail"></p>
+    </div>
+
+    <footer>
+      <a href="popup/options.html" target="_blank">Settings</a>
+      <span>·</span>
+      <a href="https://github.com/mmanthe37/excel-engine" target="_blank">GitHub</a>
+      <span>·</span>
+      <span>v1.2.0</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
